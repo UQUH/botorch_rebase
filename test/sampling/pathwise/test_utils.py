@@ -20,7 +20,11 @@ from botorch.sampling.pathwise.utils import (
     get_train_targets,
     InverseLengthscaleTransform,
     OutcomeUntransformer,
-)
+ )
+from botorch.sampling.pathwise.utils.transforms import (
+     InverseLengthscaleTransform,
+     OutcomeUntransformer,
+ )
 from botorch.utils.context_managers import delattr_ctx
 from botorch.utils.testing import BotorchTestCase
 from gpytorch.kernels import MaternKernel, ScaleKernel

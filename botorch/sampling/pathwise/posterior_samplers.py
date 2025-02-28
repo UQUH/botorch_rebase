@@ -17,6 +17,8 @@ r"""
 
 from __future__ import annotations
 
+from typing import Any, Optional
+
 import torch
 from botorch.exceptions.errors import UnsupportedError
 from botorch.models.approximate_gp import ApproximateGPyTorchModel
@@ -30,9 +32,12 @@ from botorch.sampling.pathwise.prior_samplers import (
 )
 from botorch.sampling.pathwise.update_strategies import gaussian_update, TPathwiseUpdate
 from botorch.sampling.pathwise.utils import (
+    append_transform,
+    get_input_transform,
     get_output_transform,
     get_train_inputs,
     get_train_targets,
+    prepend_transform,
     TInputTransform,
     TOutputTransform,
 )
@@ -40,6 +45,7 @@ from botorch.utils.context_managers import delattr_ctx
 from botorch.utils.dispatcher import Dispatcher
 from botorch.utils.transforms import is_ensemble
 from gpytorch.models import ApproximateGP, ExactGP, GP
+from gpytorch.variational import _VariationalStrategy
 from torch import Size, Tensor
 
 DrawMatheronPaths = Dispatcher("draw_matheron_paths")
@@ -79,7 +85,7 @@ class MatheronPath(PathDict):
         """
 
         super().__init__(
-            join=sum,
+            reducer=sum,
             paths={"prior_paths": prior_paths, "update_paths": update_paths},
             input_transform=input_transform,
             output_transform=output_transform,
@@ -162,6 +168,7 @@ def draw_matheron_paths(
             a set of sample paths representing the prior.
         update_strategy: A callable that takes a model and a tensor of prior process
             values and returns a set of sample paths representing the data.
+        **kwargs: Additional keyword arguments are passed to subroutines.
     """
 
     return DrawMatheronPaths(
@@ -222,30 +229,53 @@ def _draw_matheron_paths_ExactGP(
     )
 
 
-@DrawMatheronPaths.register((ApproximateGP, ApproximateGPyTorchModel))
+@DrawMatheronPaths.register(ApproximateGPyTorchModel)
+def _draw_matheron_paths_ApproximateGPyTorch(
+    model: ApproximateGPyTorchModel, **kwargs: Any
+) -> MatheronPath:
+    paths = draw_matheron_paths(model.model, **kwargs)
+    input_transform = get_input_transform(model)
+    if input_transform:
+        append_transform(
+            module=paths,
+            attr_name="input_transform",
+            transform=input_transform,
+        )
+
+    output_transform = get_output_transform(model)
+    if output_transform:
+        prepend_transform(
+            module=paths,
+            attr_name="output_transform",
+            transform=output_transform,
+        )
+
+    return paths
+
+
+@DrawMatheronPaths.register(ApproximateGP)
 def _draw_matheron_paths_ApproximateGP(
-    model: ApproximateGP | ApproximateGPyTorchModel,
+    model: ApproximateGP, **kwargs: Any
+) -> MatheronPath:
+    return DrawMatheronPaths(model, model.variational_strategy, **kwargs)
+
+
+@DrawMatheronPaths.register(ApproximateGP, _VariationalStrategy)
+def _draw_matheron_paths_ApproximateGP_fallback(
+    model: ApproximateGP,
+    _: _VariationalStrategy,
     *,
     sample_shape: Size,
     prior_sampler: TPathwisePriorSampler,
     update_strategy: TPathwiseUpdate,
 ) -> MatheronPath:
     # Note: Inducing points are assumed to be pre-transformed
-    Z = (
-        model.model.variational_strategy.inducing_points
-        if isinstance(model, ApproximateGPyTorchModel)
-        else model.variational_strategy.inducing_points
-    )
-    with delattr_ctx(model, "outcome_transform"):
-        # Generate draws from the prior
-        prior_paths = prior_sampler(model=model, sample_shape=sample_shape)
-        sample_values = prior_paths.forward(Z)  # `forward` bypasses transforms
+    Z = model.variational_strategy.inducing_points
 
-        # Compute pathwise updates
-        update_paths = update_strategy(model=model, sample_values=sample_values)
+    # Generate draws from the prior
+    prior_paths = prior_sampler(model=model, sample_shape=sample_shape)
+    sample_values = prior_paths.forward(Z)  # `forward` bypasses transforms
 
-    return MatheronPath(
-        prior_paths=prior_paths,
-        update_paths=update_paths,
-        output_transform=get_output_transform(model),
-    )
+    # Compute pathwise updates
+    update_paths = update_strategy(model=model, sample_values=sample_values)
+    return MatheronPath(prior_paths=prior_paths, update_paths=update_paths)

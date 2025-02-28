@@ -6,15 +6,11 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from copy import deepcopy
-from itertools import chain
+from dataclasses import replace
 from unittest.mock import patch
 
 import torch
-from botorch.models import SingleTaskGP, SingleTaskVariationalGP
-from botorch.models.transforms.input import Normalize
-from botorch.models.transforms.outcome import Standardize
+from botorch import models
 from botorch.sampling.pathwise import (
     draw_kernel_feature_paths,
     gaussian_update,
@@ -24,56 +20,54 @@ from botorch.sampling.pathwise import (
 from botorch.sampling.pathwise.utils import get_train_inputs, get_train_targets
 from botorch.utils.context_managers import delattr_ctx
 from botorch.utils.testing import BotorchTestCase
-from gpytorch.kernels import MaternKernel, RBFKernel, ScaleKernel
 from gpytorch.likelihoods import BernoulliLikelihood
 from gpytorch.models import ExactGP
 from linear_operator.operators import ZeroLinearOperator
 from linear_operator.utils.cholesky import psd_safe_cholesky
 from torch import Size
-from torch.nn.functional import pad
 
+from .helpers import gen_module, gen_random_inputs, TestCaseConfig
 
-class TestPathwiseUpdates(BotorchTestCase):
+class TestGaussianUpdates(BotorchTestCase):
     def setUp(self) -> None:
         super().setUp()
-        self.models = defaultdict(list)
+        config = TestCaseConfig(seed=0, device=self.device)
+        batch_config = replace(config, batch_shape=Size([2]))
 
-        seed = 0
-        for kernel in (
-            RBFKernel(ard_num_dims=2),
-            ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=2, batch_shape=Size([2]))),
-        ):
-            with torch.random.fork_rng():
-                torch.manual_seed(seed)
-                tkwargs = {"device": self.device, "dtype": torch.float64}
+        self.base_models = [
+            (batch_config, gen_module(models.SingleTaskGP, batch_config)),
+            (batch_config, gen_module(models.FixedNoiseGP, batch_config)),
+            (batch_config, gen_module(models.MultiTaskGP, batch_config)),
+            (config, gen_module(models.SingleTaskVariationalGP, config)),
+        ]
+        self.model_lists = [
+            (batch_config, gen_module(models.ModelListGP, batch_config))
+        ]
 
-                base = kernel.base_kernel if isinstance(kernel, ScaleKernel) else kernel
-                base.lengthscale = 0.1 + 0.3 * torch.rand_like(base.lengthscale)
-                kernel.to(**tkwargs)
-
-                uppers = 1 + 9 * torch.rand(base.lengthscale.shape[-1], **tkwargs)
-                bounds = pad(uppers.unsqueeze(0), (0, 0, 1, 0))
-
-                X = uppers * torch.rand(4, base.lengthscale.shape[-1], **tkwargs)
-                Y = 10 * kernel(X).cholesky() @ torch.randn(4, 1, **tkwargs)
-                if kernel.batch_shape:
-                    Y = Y.squeeze(-1).transpose(0, 1)  # n x m
-
-                input_transform = Normalize(d=X.shape[-1], bounds=bounds)
-                outcome_transform = Standardize(m=Y.shape[-1])
-
-                # SingleTaskGP w/ inferred noise in eval mode
-                self.models["inferred"].append(
-                    SingleTaskGP(
-                        train_X=X,
-                        train_Y=Y,
-                        covar_module=deepcopy(kernel),
-                        input_transform=deepcopy(input_transform),
-                        outcome_transform=deepcopy(outcome_transform),
-                    )
-                    .to(**tkwargs)
-                    .eval()
+    def test_base_models(self):
+        sample_shape = torch.Size([3])
+        for config, model in self.base_models:
+            tkwargs = {"device": config.device, "dtype": config.dtype}
+            if isinstance(model, models.SingleTaskVariationalGP):
+                Z = model.model.variational_strategy.inducing_points
+                X = (
+                    model.input_transform.untransform(Z)
+                    if hasattr(model, "input_transform")
+                    else Z       
                 )
+
+                target_values = torch.randn(len(Z), **tkwargs)
+                noise_values = None
+                Kuu = Kmm = model.model.covar_module(Z)
+            else:
+                (X,) = get_train_inputs(model, transformed=False)
+                (Z,) = get_train_inputs(model, transformed=True)
+                target_values = get_train_targets(model, transformed=True)
+                noise_values = torch.randn(
+                    *sample_shape, *target_values.shape, **tkwargs
+                 )
+                Kmm = model.forward(X if model.training else Z).lazy_covariance_matrix
+                Kuu = Kmm + model.likelihood.noise_covar(shape=Z.shape[:-1])
 
                 # SingleTaskGP w/ observed noise in train mode
                 self.models["observed"].append(
@@ -87,52 +81,7 @@ class TestPathwiseUpdates(BotorchTestCase):
                     ).to(**tkwargs)
                 )
 
-                # SingleTaskVariationalGP in train mode
-                # When batched, uses a multitask format which break the tests below
-                if not kernel.batch_shape:
-                    self.models["variational"].append(
-                        SingleTaskVariationalGP(
-                            train_X=X,
-                            train_Y=Y,
-                            covar_module=kernel,
-                            input_transform=input_transform,
-                            outcome_transform=outcome_transform,
-                        ).to(**tkwargs)
-                    )
-
-            seed += 1
-
-    def test_gaussian_updates(self):
-        for seed, model in enumerate(chain.from_iterable(self.models.values())):
-            with torch.random.fork_rng():
-                torch.manual_seed(seed)
-                self._test_gaussian_updates(model)
-
-    def _test_gaussian_updates(self, model):
-        sample_shape = torch.Size([3])
-
-        # Extract exact conditions and precompute covariances
-        if isinstance(model, SingleTaskVariationalGP):
-            Z = model.model.variational_strategy.inducing_points
-            X = (
-                Z
-                if model.input_transform is None
-                else model.input_transform.untransform(Z)
-            )
-            U = torch.randn(len(Z), device=Z.device, dtype=Z.dtype)
-            Kuu = Kmm = model.model.covar_module(Z)
-            noise_values = None
-        else:
-            (X,) = get_train_inputs(model, transformed=False)
-            (Z,) = get_train_inputs(model, transformed=True)
-            U = get_train_targets(model, transformed=True)
-            Kmm = model.forward(X if model.training else Z).lazy_covariance_matrix
-            Kuu = Kmm + model.likelihood.noise_covar(shape=Z.shape[:-1])
-            noise_values = torch.randn(
-                *sample_shape, *U.shape, device=U.device, dtype=U.dtype
-            )
-
-        # Disable sampling of noise variables `e` used to obtain `y = f + e`
+        # Fix noise values used to generate `y = f + e`
         with delattr_ctx(model, "outcome_transform"), patch.object(
             torch,
             "randn_like",
@@ -143,7 +92,7 @@ class TestPathwiseUpdates(BotorchTestCase):
             update_paths = gaussian_update(
                 model=model,
                 sample_values=sample_values,
-                target_values=U,
+                target_values=target_values,
             )
 
         # Test initialization
@@ -157,7 +106,7 @@ class TestPathwiseUpdates(BotorchTestCase):
 
         # Compare with manually computed update weights `Cov(y, y)^{-1} (y - f - e)`
         Luu = psd_safe_cholesky(Kuu.to_dense())
-        errors = U - sample_values
+        errors = target_values - sample_values
         if noise_values is not None:
             errors -= (
                 model.likelihood.noise_covar(shape=Z.shape[:-1]).cholesky()
@@ -167,7 +116,7 @@ class TestPathwiseUpdates(BotorchTestCase):
         self.assertTrue(weight.allclose(update_paths.weight))
 
         # Compare with manually computed update values at test locations
-        Z2 = torch.rand(16, Z.shape[-1], device=self.device, dtype=Z.dtype)
+        Z2 = gen_random_inputs(model, batch_shape=[16], transformed=True)
         X2 = (
             model.input_transform.untransform(Z2)
             if hasattr(model, "input_transform")
@@ -183,15 +132,15 @@ class TestPathwiseUpdates(BotorchTestCase):
         update_paths = gaussian_update(
             model=model,
             sample_values=sample_values,
-            target_values=U,
+            target_values=target_values,
             noise_covariance=ZeroLinearOperator(m, m, dtype=X.dtype),
         )
         Lmm = psd_safe_cholesky(Kmm.to_dense())
-        errors = U - sample_values
+        errors = target_values - sample_values
         weight = torch.cholesky_solve(errors.unsqueeze(-1), Lmm).squeeze(-1)
         self.assertTrue(weight.allclose(update_paths.weight))
 
-        if isinstance(model, SingleTaskVariationalGP):
+        if isinstance(model, models.SingleTaskVariationalGP):
             # Test passing non-zero `noise_covariance``
             with patch.object(model, "likelihood", new=BernoulliLikelihood()):
                 with self.assertRaisesRegex(NotImplementedError, "not yet supported"):

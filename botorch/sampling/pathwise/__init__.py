@@ -6,7 +6,10 @@
 
 
 from botorch.sampling.pathwise.features import (
-    gen_kernel_features,
+    FeatureMap,
+    FeatureMapList,
+    FourierFeatureMap,
+    gen_kernel_feature_map,
     KernelEvaluationMap,
     KernelFeatureMap,
 )
@@ -28,7 +31,10 @@ from botorch.sampling.pathwise.update_strategies import gaussian_update
 __all__ = [
     "draw_matheron_paths",
     "draw_kernel_feature_paths",
-    "gen_kernel_features",
+    "FeatureMap",
+    "FeatureMapList",
+    "FourierFeatureMap",
+    "gen_kernel_feature_map",
     "get_matheron_path_model",
     "gaussian_update",
     "GeneralizedLinearPath",
