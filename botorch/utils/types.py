@@ -16,3 +16,14 @@ class _DefaultType(type):
 
 
 DEFAULT = _DefaultType("DEFAULT", (), {})
+
+
+class _MissingType(type):
+    r"""
+    Private class whose sole instance `MISSING` is a special indicator
+    representing that an optional argument has not been passed. Typically used
+    in cases where `None` is an allowed argument.
+    """
+
+
+MISSING = _MissingType("MISSING", (), {})

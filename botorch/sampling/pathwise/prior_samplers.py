@@ -12,7 +12,7 @@ from typing import Any
 
 from botorch.models.approximate_gp import ApproximateGPyTorchModel
 from botorch.models.model_list_gp_regression import ModelListGP
-from botorch.sampling.pathwise.features import gen_kernel_features
+from botorch.sampling.pathwise.features import gen_kernel_feature_map
 from botorch.sampling.pathwise.features.generators import TKernelFeatureMapGenerator
 from botorch.sampling.pathwise.paths import GeneralizedLinearPath, PathList, SamplePath
 from botorch.sampling.pathwise.utils import (
@@ -56,8 +56,8 @@ def _draw_kernel_feature_paths_fallback(
     mean_module: Module | None,
     covar_module: Kernel,
     sample_shape: Size,
-    num_features: int = 1024,
-    map_generator: TKernelFeatureMapGenerator = gen_kernel_features,
+    num_random_features: int = 1024,
+    map_generator: TKernelFeatureMapGenerator = gen_kernel_feature_map,
     input_transform: TInputTransform | None = None,
     output_transform: TOutputTransform | None = None,
     weight_generator: Callable[[Size], Tensor] | None = None,
@@ -65,21 +65,21 @@ def _draw_kernel_feature_paths_fallback(
     # Generate a kernel feature map
     feature_map = map_generator(
         kernel=covar_module,
-        num_inputs=num_inputs,
-        num_outputs=num_features,
+        num_ambient_inputs=num_inputs,
+        num_random_features=num_random_features,
     )
 
     # Sample random weights with which to combine kernel features
     if weight_generator is None:
         weight = draw_sobol_normal_samples(
             n=sample_shape.numel() * covar_module.batch_shape.numel(),
-            d=feature_map.num_outputs,
+            d=feature_map.output_shape[0],
             device=covar_module.device,
             dtype=covar_module.dtype,
-        ).reshape(sample_shape + covar_module.batch_shape + (feature_map.num_outputs,))
+        ).reshape(sample_shape + covar_module.batch_shape + feature_map.output_shape)
     else:
         weight = weight_generator(
-            sample_shape + covar_module.batch_shape + (feature_map.num_outputs,)
+            sample_shape + covar_module.batch_shape + feature_map.output_shape
         ).to(device=covar_module.device, dtype=covar_module.dtype)
 
     # Return the sample paths
@@ -110,11 +110,11 @@ def _draw_kernel_feature_paths_ExactGP(
 @DrawKernelFeaturePaths.register(ModelListGP)
 def _draw_kernel_feature_paths_list(
     model: ModelListGP,
-    join: Callable[[list[Tensor]], Tensor] | None = None,
+    reducer: Callable[[list[Tensor]], Tensor] | None = None,
     **kwargs: Any,
 ) -> PathList:
     paths = [draw_kernel_feature_paths(m, **kwargs) for m in model.models]
-    return PathList(paths=paths, join=join)
+    return PathList(paths=paths, reducer=reducer)
 
 
 @DrawKernelFeaturePaths.register(ApproximateGPyTorchModel)
