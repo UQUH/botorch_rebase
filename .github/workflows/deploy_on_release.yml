@@ -1,0 +1,91 @@
+name: Deploy On Release
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+
+jobs:
+
+  tests-and-coverage:
+    name: Test & Coverage
+    uses: ./.github/workflows/reusable_test.yml
+    with:
+      use_latest_pytorch_gpytorch: false
+    secrets: inherit
+
+  package-deploy-pypi:
+    name: Package and deploy to pypi.org
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # This is required for PyPI OIDC authentication.
+    env:
+      # `uv pip ...` requires venv by default. This skips that requirement.
+      UV_SYSTEM_PYTHON: 1
+    needs: tests-and-coverage
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+    - name: Fetch all history for all tags and branches
+      run: git fetch --prune --unshallow
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Install dependencies
+      run: |
+        uv pip install .[test]
+        uv pip install --upgrade build setuptools setuptools_scm wheel
+    - name: Build packages (wheel and source distribution)
+      run: |
+        python -m build --sdist --wheel
+    - name: Verify packages
+      run: |
+        ./scripts/verify_py_packages.sh
+    - name: Deploy to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        verbose: true
+
+  check-versions:
+    needs: package-deploy-pypi
+    name: Check if major or minor version changed
+    runs-on: ubuntu-latest
+    outputs:
+      major_minor_changed: ${{ steps.compare.outputs.major_minor_changed }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        fetch-tags: true
+        ref: ${{ github.sha }}
+    - name: Check if major or minor version changed
+      id: compare
+      run: |
+        git fetch --tags --force
+        previous_version=$(git describe --tags --abbrev=0 ${{ github.event.release.tag_name }}^)
+        prev=$(cut -d '.' -f 1-2 <<< $previous_version) # remove patch number
+        prev=${prev#v}                                  # remove optional "v" prefix
+        next=$(cut -d '.' -f 1-2 <<< ${{ github.event.release.tag_name }})
+        next=${next#v}
+
+        echo "Updating from version $previous_version to ${{ github.event.release.tag_name }}"
+        if [[ "$prev" == "$next" ]]; then
+          echo "::warning::Major/Minor version was not changed. Skipping website & docs generation step."
+        else
+          echo major_minor_changed=true >> $GITHUB_OUTPUT
+        fi
+
+  version-and-publish-website:
+    needs: check-versions
+    name: Version and Publish website
+    if: ${{ needs.check-versions.outputs.major_minor_changed == 'true' }}
+    uses: ./.github/workflows/publish_website.yml
+    with:
+      new_version: ${{ github.event.release.tag_name }}
+    permissions:
+      pages: write
+      id-token: write
+      contents: write
