@@ -81,22 +81,28 @@ Pathwise Update Strategies
 .. automodule:: botorch.sampling.pathwise.update_strategies
     :members:
 
-Utilities
+Pathwise Utilities
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: botorch.sampling.pathwise.utils
     :members:
 
-Utility Helpers
+Pathwise Utility Helpers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: botorch.sampling.pathwise.utils.helpers
     :members:
+    :undoc-members:
+    :show-inheritance:
 
-Utility Mixins
+Pathwise Utility Mixins
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: botorch.sampling.pathwise.utils.mixins
     :members:
+    :undoc-members:
+    :show-inheritance:
 
-Utility Transforms
+Pathwise Utility Transforms
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. automodule:: botorch.sampling.pathwise.utils.transforms
     :members:
+    :undoc-members:
+    :show-inheritance:

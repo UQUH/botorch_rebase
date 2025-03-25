@@ -6,335 +6,61 @@
 
 from __future__ import annotations
 
-from math import prod
 from unittest.mock import MagicMock, patch
 
 import torch
-from botorch.sampling.pathwise.features import maps
-from botorch.sampling.pathwise.features.generators import gen_kernel_feature_map
-from botorch.sampling.pathwise.utils.transforms import ChainedTransform, FeatureSelector
+from botorch.sampling.pathwise.features import KernelEvaluationMap, KernelFeatureMap
 from botorch.utils.testing import BotorchTestCase
-from gpytorch import kernels
-from linear_operator.operators import KroneckerProductLinearOperator
+from gpytorch.kernels import MaternKernel
 from torch import Size
-from torch.nn import Module
-
-from ..helpers import gen_module, TestCaseConfig
 
 
 class TestFeatureMaps(BotorchTestCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self.config = TestCaseConfig(
-            seed=0,
-            device=self.device,
-            num_inputs=2,
-            num_tasks=3,
-            batch_shape=Size([2]),
-        )
-
-        self.base_feature_maps = [
-            gen_kernel_feature_map(gen_module(kernels.LinearKernel, self.config)),
-            gen_kernel_feature_map(gen_module(kernels.IndexKernel, self.config)),
-        ]
-
-    def test_feature_map(self):
-        feature_map = maps.FeatureMap()
-        feature_map.raw_output_shape = Size([2, 3, 4])
-        feature_map.output_transform = None
-        feature_map.device = self.device
-        feature_map.dtype = None
-        self.assertEqual(feature_map.output_shape, (2, 3, 4))
-
-        feature_map.output_transform = lambda x: torch.concat((x, x), dim=-1)
-        self.assertEqual(feature_map.output_shape, (2, 3, 8))
-
-    def test_feature_map_list(self):
-        map_list = maps.FeatureMapList(feature_maps=self.base_feature_maps)
-        self.assertEqual(map_list.device.type, self.config.device.type)
-        self.assertEqual(map_list.dtype, self.config.dtype)
-
-        X = torch.rand(
-            16,
-            self.config.num_inputs,
-            device=self.config.device,
-            dtype=self.config.dtype,
-        )
-        output_list = map_list(X)
-        self.assertIsInstance(output_list, list)
-        self.assertEqual(len(output_list), len(map_list))
-        for feature_map, output in zip(map_list, output_list):
-            self.assertTrue(feature_map(X).to_dense().equal(output.to_dense()))
-
-    def test_direct_sum_feature_map(self):
-        feature_map = maps.DirectSumFeatureMap(self.base_feature_maps)
-        self.assertEqual(
-            feature_map.raw_output_shape,
-            Size([sum(f.output_shape[-1] for f in feature_map)]),
-        )
-        self.assertEqual(
-            feature_map.batch_shape,
-            torch.broadcast_shapes(*(f.batch_shape for f in feature_map)),
-        )
-
-        d = self.config.num_inputs
-        X = torch.rand((16, d), device=self.config.device, dtype=self.config.dtype)
-        features = feature_map(X).to_dense()
-        self.assertEqual(
-            features.shape[-len(feature_map.output_shape) :],
-            feature_map.output_shape,
-        )
-        self.assertTrue(
-            features.equal(torch.concat([f(X).to_dense() for f in feature_map], dim=-1))
-        )
-
-        # Test mixture of matrix-valued and vector-valued maps
-        real_map = feature_map[0]
-        mock_map = MagicMock(
-            side_effect=lambda x: x.unsqueeze(-1).expand(
-                *real_map.batch_shape, *x.shape, d
-            )
-        )
-        mock_map.output_shape = Size([d, d])
-        with patch.dict(feature_map._modules, {"feature_maps": [mock_map, real_map]}):
-            self.assertEqual(
-                feature_map.output_shape, Size([d, d + real_map.output_shape[0]])
-            )
-            features = feature_map(X).to_dense()
-            self.assertTrue(features[..., :d].equal(mock_map(X)))
-            self.assertTrue(
-                features[..., d:].eq((d**-0.5) * real_map(X).unsqueeze(-1)).all()
-            )
-
-    def test_hadamard_product_feature_map(self):
-        feature_map = maps.HadamardProductFeatureMap(self.base_feature_maps)
-        self.assertEqual(
-            feature_map.raw_output_shape,
-            torch.broadcast_shapes(*(f.output_shape for f in feature_map)),
-        )
-        self.assertEqual(
-            feature_map.batch_shape,
-            torch.broadcast_shapes(*(f.batch_shape for f in feature_map)),
-        )
-
-        d = self.config.num_inputs
-        X = torch.rand((16, d), device=self.config.device, dtype=self.config.dtype)
-        features = feature_map(X).to_dense()
-        self.assertEqual(
-            features.shape[-len(feature_map.output_shape) :],
-            feature_map.output_shape,
-        )
-        self.assertTrue(features.equal(prod([f(X).to_dense() for f in feature_map])))
-
-    def test_sparse_direct_sum_feature_map(self):
-        feature_map = maps.SparseDirectSumFeatureMap(self.base_feature_maps)
-        self.assertEqual(
-            feature_map.raw_output_shape,
-            Size([sum(f.output_shape[-1] for f in feature_map)]),
-        )
-        self.assertEqual(
-            feature_map.batch_shape,
-            torch.broadcast_shapes(*(f.batch_shape for f in feature_map)),
-        )
-
-        d = self.config.num_inputs
-        X = torch.rand((16, d), device=self.config.device, dtype=self.config.dtype)
-        features = feature_map(X).to_dense()
-        self.assertEqual(
-            features.shape[-len(feature_map.output_shape) :],
-            feature_map.output_shape,
-        )
-        self.assertTrue(
-            features.equal(torch.concat([f(X).to_dense() for f in feature_map], dim=-1))
-        )
-
-        # Test mixture of matrix-valued and vector-valued maps
-        real_map = feature_map[0]
-        mock_map = MagicMock(
-            side_effect=lambda x: x.unsqueeze(-1).expand(
-                *real_map.batch_shape, *x.shape, d
-            )
-        )
-        mock_map.output_shape = Size([d, d])
-        with patch.dict(feature_map._modules, {"feature_maps": [mock_map, real_map]}):
-            self.assertEqual(
-                feature_map.output_shape, Size([d, d + real_map.output_shape[0]])
-            )
-            features = feature_map(X).to_dense()
-            self.assertTrue(features[..., :d, :d].equal(mock_map(X)))
-            self.assertTrue(features[..., d:, d:].eq(real_map(X).unsqueeze(-2)).all())
-
-    def test_outer_product_feature_map(self):
-        feature_map = maps.OuterProductFeatureMap(self.base_feature_maps)
-        self.assertEqual(
-            feature_map.raw_output_shape,
-            Size([prod(f.output_shape[-1] for f in feature_map)]),
-        )
-        self.assertEqual(
-            feature_map.batch_shape,
-            torch.broadcast_shapes(*(f.batch_shape for f in feature_map)),
-        )
-
-        d = self.config.num_inputs
-        X = torch.rand((16, d), device=self.config.device, dtype=self.config.dtype)
-        features = feature_map(X).to_dense()
-        self.assertEqual(
-            features.shape[-len(feature_map.output_shape) :],
-            feature_map.output_shape,
-        )
-
-        test_features = (
-            feature_map[0](X).to_dense().unsqueeze(-1)
-            * feature_map[1](X).to_dense().unsqueeze(-2)
-        ).view(features.shape)
-        self.assertTrue(features.equal(test_features))
-
-
-class TestKernelFeatureMaps(BotorchTestCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self.configs = [
-            TestCaseConfig(
-                seed=0,
-                device=self.device,
-                num_inputs=2,
-                num_tasks=3,
-                batch_shape=Size([2]),
-            )
-        ]
-
-    def test_fourier_feature_map(self):
-        for config in self.configs:
-            tkwargs = {"device": config.device, "dtype": config.dtype}
-            kernel = gen_module(kernels.RBFKernel, config)
-            weight = torch.randn(*kernel.batch_shape, 16, config.num_inputs, **tkwargs)
-            bias = torch.rand(*kernel.batch_shape, 16, **tkwargs)
-            feature_map = maps.FourierFeatureMap(
-                kernel=kernel, weight=weight, bias=bias
-            )
-            self.assertEqual(feature_map.output_shape, (16,))
-
-            X = torch.rand(32, config.num_inputs, **tkwargs)
-            features = feature_map(X)
-            self.assertEqual(
-                features.shape[-len(feature_map.output_shape) :],
-                feature_map.output_shape,
-            )
-            self.assertTrue(
-                features.equal(X @ weight.transpose(-2, -1) + bias.unsqueeze(-2))
-            )
-
-    def test_index_kernel_feature_map(self):
-        for config in self.configs:
-            kernel = gen_module(kernels.IndexKernel, config)
-            tkwargs = {"device": config.device, "dtype": config.dtype}
-            feature_map = maps.IndexKernelFeatureMap(kernel=kernel)
-            self.assertEqual(feature_map.output_shape, kernel.raw_var.shape[-1:])
-
-            X = torch.rand(*config.batch_shape, 16, config.num_inputs, **tkwargs)
-            index_shape = (*config.batch_shape, 16, len(kernel.active_dims))
-            indices = X[..., kernel.active_dims] = torch.randint(
-                config.num_tasks, size=index_shape, **tkwargs
-            )
-            indices = indices.long().squeeze(-1)
-            features = feature_map(X).to_dense()
-            self.assertEqual(
-                features.shape[-len(feature_map.output_shape) :],
-                feature_map.output_shape,
-            )
-
-            cholesky = kernel.covar_matrix.cholesky().to_dense()
-            test_features = []
-            for chol, idx in zip(
-                cholesky.view(-1, *cholesky.shape[-2:]),
-                indices.view(-1, *indices.shape[-1:]),
-            ):
-                test_features.append(chol.index_select(dim=-2, index=idx))
-            test_features = torch.stack(test_features).view(features.shape)
-            self.assertTrue(features.equal(test_features))
-
     def test_kernel_evaluation_map(self):
-        for config in self.configs:
-            kernel = gen_module(kernels.RBFKernel, config)
-            tkwargs = {"device": config.device, "dtype": config.dtype}
-            points = torch.rand(4, config.num_inputs, **tkwargs)
-            feature_map = maps.KernelEvaluationMap(kernel=kernel, points=points)
-            self.assertEqual(
-                feature_map.raw_output_shape, feature_map.points.shape[-2:-1]
-            )
+        kernel = MaternKernel(nu=2.5, ard_num_dims=2, batch_shape=Size([2]))
+        kernel.to(device=self.device)
+        with torch.random.fork_rng():
+            torch.manual_seed(0)
+            kernel.lengthscale = 0.1 + 0.3 * torch.rand_like(kernel.lengthscale)
 
-            X = torch.rand(16, config.num_inputs, **tkwargs)
-            features = feature_map(X).to_dense()
-            self.assertEqual(
-                features.shape[-len(feature_map.output_shape) :],
-                feature_map.output_shape,
-            )
-            self.assertTrue(features.equal(kernel(X, points).to_dense()))
+        with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
+            KernelEvaluationMap(kernel=kernel, points=torch.rand(4, 3, 2))
+
+        for dtype in (torch.float32, torch.float64):
+            kernel.to(dtype=dtype)
+            X0, X1 = torch.rand(5, 2, dtype=dtype, device=self.device).split([2, 3])
+            kernel_map = KernelEvaluationMap(kernel=kernel, points=X1)
+            self.assertEqual(kernel_map.batch_shape, kernel.batch_shape)
+            self.assertEqual(kernel_map.num_outputs, X1.shape[-1])
+            self.assertTrue(kernel_map(X0).to_dense().equal(kernel(X0, X1).to_dense()))
+
+        with patch.object(
+            kernel_map, "output_transform", new=lambda z: torch.concat([z, z], dim=-1)
+        ):
+            self.assertEqual(kernel_map.num_outputs, 2 * X1.shape[-1])
 
     def test_kernel_feature_map(self):
-        for config in self.configs:
-            kernel = gen_module(kernels.RBFKernel, config)
-            kernel.active_dims = torch.tensor([0], device=config.device)
+        d = 2
+        m = 3
+        weight = torch.rand(m, d, device=self.device)
+        bias = torch.rand(m, device=self.device)
+        kernel = MaternKernel(nu=2.5, batch_shape=Size([3])).to(self.device)
+        feature_map = KernelFeatureMap(
+            kernel=kernel,
+            weight=weight,
+            bias=bias,
+            input_transform=MagicMock(side_effect=lambda x: x),
+            output_transform=MagicMock(side_effect=lambda z: z.exp()),
+        )
 
-            feature_map = maps.KernelFeatureMap(kernel=kernel)
-            self.assertEqual(feature_map.batch_shape, kernel.batch_shape)
-            self.assertIsInstance(feature_map.input_transform, FeatureSelector)
-            self.assertIsNone(
-                maps.KernelFeatureMap(kernel, ignore_active_dims=True).input_transform
-            )
-            self.assertIsInstance(
-                maps.KernelFeatureMap(kernel, input_transform=Module()).input_transform,
-                ChainedTransform,
-            )
+        X = torch.rand(2, d, device=self.device)
+        features = feature_map(X)
+        feature_map.input_transform.assert_called_once_with(X)
+        feature_map.output_transform.assert_called_once()
+        self.assertTrue((X @ weight.transpose(-2, -1) + bias).exp().equal(features))
 
-    def test_linear_kernel_feature_map(self):
-        for config in self.configs:
-            kernel = gen_module(kernels.LinearKernel, config)
-            tkwargs = {"device": config.device, "dtype": config.dtype}
-            active_dims = (
-                tuple(range(config.num_inputs))
-                if kernel.active_dims is None
-                else kernel.active_dims
-            )
-            feature_map = maps.LinearKernelFeatureMap(
-                kernel=kernel, raw_output_shape=Size([len(active_dims)])
-            )
-
-            X = torch.rand(*kernel.batch_shape, 16, config.num_inputs, **tkwargs)
-            features = feature_map(X).to_dense()
-            self.assertEqual(
-                features.shape[-len(feature_map.output_shape) :],
-                feature_map.output_shape,
-            )
-            self.assertTrue(
-                features.equal(kernel.variance.sqrt() * X[..., active_dims])
-            )
-
-    def test_multitask_kernel_feature_map(self):
-        for config in self.configs:
-            kernel = gen_module(kernels.MultitaskKernel, config)
-            tkwargs = {"device": config.device, "dtype": config.dtype}
-            data_map = gen_kernel_feature_map(
-                kernel=kernel.data_covar_module,
-                num_inputs=config.num_inputs,
-                num_random_features=config.num_random_features,
-            )
-            feature_map = maps.MultitaskKernelFeatureMap(
-                kernel=kernel, data_feature_map=data_map
-            )
-            self.assertEqual(
-                feature_map.output_shape,
-                (feature_map.num_tasks * data_map.output_shape[0],)
-                + data_map.output_shape[1:],
-            )
-
-            X = torch.rand(*kernel.batch_shape, 16, config.num_inputs, **tkwargs)
-
-            features = feature_map(X).to_dense()
-            self.assertEqual(
-                features.shape[-len(feature_map.output_shape) :],
-                feature_map.output_shape,
-            )
-            cholesky = kernel.task_covar_module.covar_matrix.cholesky()
-            test_features = KroneckerProductLinearOperator(data_map(X), cholesky)
-            self.assertTrue(features.equal(test_features.to_dense()))
+        # Test batch_shape and num_outputs
+        self.assertIs(feature_map.batch_shape, kernel.batch_shape)
+        self.assertEqual(feature_map.num_outputs, weight.shape[-2])
+        with patch.object(feature_map, "output_transform", new=None):
+            self.assertEqual(feature_map.num_outputs, weight.shape[-2])

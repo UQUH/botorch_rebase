@@ -20,7 +20,7 @@ class IdentityPath(SamplePath):
 
 class TestGenericPaths(BotorchTestCase):
     def test_path_dict(self):
-        with self.assertRaisesRegex(UnsupportedError, "preceded by a `reducer`"):
+        with self.assertRaisesRegex(UnsupportedError, "must be preceded by a join"):
             PathDict(output_transform="foo")
 
         A = IdentityPath()
@@ -42,7 +42,7 @@ class TestGenericPaths(BotorchTestCase):
         self.assertTrue(x.equal(output.pop("1")))
         self.assertTrue(not output)
 
-        path_dict.reducer = torch.stack
+        path_dict.join = torch.stack
         output = path_dict(x)
         self.assertIsInstance(output, torch.Tensor)
         self.assertEqual(output.shape, (2,) + x.shape)
@@ -67,7 +67,7 @@ class TestGenericPaths(BotorchTestCase):
         self.assertEqual(("0",), tuple(path_dict))
 
     def test_path_list(self):
-        with self.assertRaisesRegex(UnsupportedError, "preceded by a `reducer`"):
+        with self.assertRaisesRegex(UnsupportedError, "must be preceded by a join"):
             PathList(output_transform="foo")
 
         # Test __init__
@@ -88,7 +88,7 @@ class TestGenericPaths(BotorchTestCase):
         self.assertTrue(x.equal(output.pop()))
         self.assertTrue(not output)
 
-        path_list.reducer = torch.stack
+        path_list.join = torch.stack
         output = path_list(x)
         self.assertIsInstance(output, torch.Tensor)
         self.assertEqual(output.shape, (2,) + x.shape)

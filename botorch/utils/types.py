@@ -6,21 +6,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Type, TypeVar
-
-T = TypeVar("T")  # generic type variable
-
-
-def cast(typ: Type[T], obj: Any, optional: bool = False) -> T:
-    if (optional and obj is None) or isinstance(obj, typ):
-        return obj
-
-    return typ(obj)
-
 
 class _DefaultType(type):
     r"""
-    Private class whose sole instance :code:`DEFAULT` is a special indicator
+    Private class whose sole instance `DEFAULT` is as a special indicator
     representing that a default value should be assigned to an argument.
     Typically used in cases where `None` is an allowed argument.
     """
@@ -31,10 +20,10 @@ DEFAULT = _DefaultType("DEFAULT", (), {})
 
 class _MissingType(type):
     r"""
-    Private class whose sole instance :code:`MISSING` is a special indicator
+    Private class whose sole instance `MISSING` is a special indicator
     representing that an optional argument has not been passed. Typically used
     in cases where `None` is an allowed argument.
     """
 
 
-MISSING = _DefaultType("MISSING", (), {})
+MISSING = _MissingType("MISSING", (), {})

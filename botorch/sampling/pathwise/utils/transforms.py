@@ -7,12 +7,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Iterable, Union
+from typing import Any, Iterable, Optional, Union
 
 import torch
 from botorch.models.transforms.outcome import OutcomeTransform
 from gpytorch.kernels import ScaleKernel
-from gpytorch.kernels.kernel import Kernel
 from torch import LongTensor, Tensor
 from torch.nn import Module, ModuleList
 
@@ -69,14 +68,24 @@ class CosineTransform(TensorTransform):
 class SineCosineTransform(TensorTransform):
     r"""A transform that returns concatenated sine and cosine features."""
 
+    def __init__(self, constant: Optional[Tensor] = None):
+        r"""Initializes a SineCosineTransform instance.
+
+        Args:
+            constant: An optional tensor used to rescale the module's outputs.
+        """
+        super().__init__()
+        self.register_buffer("constant", constant)
+
     def forward(self, values: Tensor) -> Tensor:
-        return torch.concat([values.sin(), values.cos()], dim=-1)
+        sincos = torch.concat([values.sin(), values.cos()], dim=-1)
+        return sincos if self.constant is None else self.constant * sincos
 
 
 class InverseLengthscaleTransform(TensorTransform):
     r"""A transform that divides its inputs by a kernels lengthscales."""
 
-    def __init__(self, kernel: Kernel):
+    def __init__(self, kernel: ScaleKernel):
         r"""Initializes an InverseLengthscaleTransform instance.
 
         Args:
@@ -165,4 +174,4 @@ class OutcomeUntransformer(TensorTransform):
 
         # BoTorch has moved the output dimension inside as the final batch dimension.
         output_values, _ = self.transform.untransform(values.transpose(-2, -1))
-        return output_values.transpose(-2, -1)
+        return output_values.transpose(-2, -1) 

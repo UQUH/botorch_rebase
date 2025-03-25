@@ -15,14 +15,14 @@ from typing import Any, Iterable, List, Optional, Union
 import torch
 from botorch.exceptions.errors import UnsupportedError
 from botorch.sampling.pathwise.utils import (
+    ChainedTransform,
+    FeatureSelector,
     ModuleListMixin,
-    sparse_block_diag,
     TInputTransform,
     TOutputTransform,
     TransformedModuleMixin,
     untransform_shape,
 )
-from botorch.sampling.pathwise.utils.transforms import ChainedTransform, FeatureSelector
 from gpytorch import kernels
 from linear_operator.operators import (
     InterpolatedLinearOperator,
@@ -36,139 +36,57 @@ from torch.nn import Module
 class FeatureMap(TransformedModuleMixin, Module):
     raw_output_shape: Size
     batch_shape: Size
-    input_transform: TInputTransform | None
-    output_transform: TOutputTransform | None
+    input_transform: Optional[TInputTransform]
+    output_transform: Optional[TOutputTransform]
     device: Optional[torch.device]
     dtype: Optional[torch.dtype]
 
     @abstractmethod
     def forward(self, x: Tensor, **kwargs: Any) -> Any:
-       pass
+        pass
 
     @property
     def output_shape(self) -> Size:
-       if self.output_transform is None:
-           return self.raw_output_shape
+        if self.output_transform is None:
+            return self.raw_output_shape
 
-       return untransform_shape(
-           self.output_transform,
-           self.raw_output_shape,
-           device=self.device,
-           dtype=self.dtype,
-       )
+        return untransform_shape(
+            self.output_transform,
+            self.raw_output_shape,
+            device=self.device,
+            dtype=self.dtype,
+        )
 
 
 class FeatureMapList(Module, ModuleListMixin[FeatureMap]):
-   def __init__(self, feature_maps: Iterable[FeatureMap]):
-       Module.__init__(self)
-       ModuleListMixin.__init__(self, attr_name="feature_maps", modules=feature_maps)
+    def __init__(self, feature_maps: Iterable[FeatureMap]):
+        Module.__init__(self)
+        ModuleListMixin.__init__(self, attr_name="feature_maps", modules=feature_maps)
 
-   def forward(self, x: Tensor, **kwargs: Any) -> List[Union[Tensor, LinearOperator]]:
-       return [feature_map(x, **kwargs) for feature_map in self]
+    def forward(self, x: Tensor, **kwargs: Any) -> List[Union[Tensor, LinearOperator]]:
+        return [feature_map(x, **kwargs) for feature_map in self]
 
-   @property
-   def device(self) -> Optional[torch.device]:
-       devices = {feature_map.device for feature_map in self}
-       devices.discard(None)
-       if len(devices) > 1:
-           raise UnsupportedError(f"Feature maps must be colocated, but {devices=}.")
-       return next(iter(devices)) if devices else None
+    @property
+    def device(self) -> Optional[torch.device]:
+        devices = {feature_map.device for feature_map in self}
+        devices.discard(None)
+        if len(devices) > 1:
+            raise UnsupportedError(f"Feature maps must be colocated, but {devices=}.")
+        return next(iter(devices)) if devices else None
 
-   @property
-   def dtype(self) -> Optional[torch.dtype]:
-       dtypes = {feature_map.dtype for feature_map in self}
-       dtypes.discard(None)
-       if len(dtypes) > 1:
-           raise UnsupportedError(
-               f"Feature maps must have the same data type, but {dtypes=}."
-           )
-       return next(iter(dtypes)) if dtypes else None
+    @property
+    def dtype(self) -> Optional[torch.dtype]:
+        dtypes = {feature_map.dtype for feature_map in self}
+        dtypes.discard(None)
+        if len(dtypes) > 1:
+            raise UnsupportedError(
+                f"Feature maps must have the same data type, but {dtypes=}."
+            )
+        return next(iter(dtypes)) if dtypes else None
 
 
 class DirectSumFeatureMap(FeatureMap, FeatureMapList):
-   r"""Direct sums of features."""
-
-   def __init__(
-       self,
-       feature_maps: Iterable[FeatureMap],
-       input_transform: Optional[TInputTransform] = None,
-       output_transform: Optional[TOutputTransform] = None,
-   ):
-       FeatureMap.__init__(self)
-       FeatureMapList.__init__(self, feature_maps=feature_maps)
-       self.input_transform = input_transform
-       self.output_transform = output_transform
-
-   def forward(self, x: Tensor, **kwargs: Any) -> Tensor:
-       blocks = []
-       shape = self.raw_output_shape
-       ndim = len(shape)
-       for feature_map in self:
-           block = feature_map(x, **kwargs).to_dense()
-           block_ndim = len(feature_map.output_shape)
-           if block_ndim < ndim:
-               tile_shape = shape[-ndim:-block_ndim]
-               num_copies = prod(tile_shape)
-               if num_copies > 1:
-                   block = block * (num_copies**-0.5)
-
-               multi_index = (
-                   ...,
-                   *repeat(None, ndim - block_ndim),
-                   *repeat(slice(None), block_ndim),
-               )
-               block = block[multi_index].expand(
-                   *block.shape[:-block_ndim], *tile_shape, *block.shape[-block_ndim:]
-               )
-           blocks.append(block)
-
-       return torch.concat(blocks, dim=-1)
-
-   @property
-   def raw_output_shape(self) -> Size:
-       map_iter = iter(self)
-       feature_map = next(map_iter)
-       concat_size = feature_map.output_shape[-1]
-       batch_shape = feature_map.output_shape[:-1]
-       for feature_map in map_iter:
-           concat_size += feature_map.output_shape[-1]
-           batch_shape = torch.broadcast_shapes(
-               batch_shape, feature_map.output_shape[:-1]
-           )
-       return Size((*batch_shape, concat_size))
-
-   @property
-   def batch_shape(self) -> Size:
-       batch_shapes = {feature_map.batch_shape for feature_map in self}
-       if len(batch_shapes) > 1:
-           raise ValueError(
-               f"Component maps have the same batch shapes, but {batch_shapes=}."
-           )
-       return next(iter(batch_shapes))
-
-
-class SparseDirectSumFeatureMap(DirectSumFeatureMap):
-   def forward(self, x: Tensor, **kwargs: Any) -> Tensor:
-       blocks = []
-       ndim = max(len(f.output_shape) for f in self)
-       for feature_map in self:
-           block = feature_map(x, **kwargs)
-           block_ndim = len(feature_map.output_shape)
-           if block_ndim == ndim:
-               block = block.to_dense() if isinstance(block, LinearOperator) else block
-               block = block if block.is_sparse else block.to_sparse()
-           else:
-               multi_index = (
-                   ...,
-                   *repeat(None, ndim - block_ndim),
-                   *repeat(slice(None), block_ndim),
-               )
-               block = block.to_dense()[multi_index]
-           blocks.append(block)
-       return sparse_block_diag(blocks, base_ndim=ndim)
-
-class HadamardProductFeatureMap(FeatureMap, FeatureMapList):
-    r"""Hadamard product of features."""
+    r"""Direct sums of features."""
 
     def __init__(
         self,
@@ -182,16 +100,51 @@ class HadamardProductFeatureMap(FeatureMap, FeatureMapList):
         self.output_transform = output_transform
 
     def forward(self, x: Tensor, **kwargs: Any) -> Tensor:
-        return prod(feature_map(x, **kwargs) for feature_map in self)
+        blocks = []
+        shape = self.raw_output_shape
+        ndim = len(shape)
+        for feature_map in self:
+            block = feature_map(x, **kwargs).to_dense()
+            block_ndim = len(feature_map.output_shape)
+            if block_ndim < ndim:
+                tile_shape = shape[-ndim:-block_ndim]
+                num_copies = prod(tile_shape)
+                if num_copies > 1:
+                    block = block * (num_copies**-0.5)
+
+                multi_index = (
+                    ...,
+                    *repeat(None, ndim - block_ndim),
+                    *repeat(slice(None), block_ndim),
+                )
+                block = block[multi_index].expand(
+                    *block.shape[:-block_ndim], *tile_shape, *block.shape[-block_ndim:]
+                )
+            blocks.append(block)
+
+        return torch.concat(blocks, dim=-1)
 
     @property
     def raw_output_shape(self) -> Size:
-        return torch.broadcast_shapes(*(f.output_shape for f in self))
+        map_iter = iter(self)
+        feature_map = next(map_iter)
+        concat_size = feature_map.output_shape[-1]
+        batch_shape = feature_map.output_shape[:-1]
+        for feature_map in map_iter:
+            concat_size += feature_map.output_shape[-1]
+            batch_shape = torch.broadcast_shapes(
+                batch_shape, feature_map.output_shape[:-1]
+            )
+        return Size((*batch_shape, concat_size))
 
     @property
     def batch_shape(self) -> Size:
-        batch_shapes = (feature_map.batch_shape for feature_map in self)
-        return torch.broadcast_shapes(*batch_shapes)
+        batch_shapes = {feature_map.batch_shape for feature_map in self}
+        if len(batch_shapes) > 1:
+            raise ValueError(
+                f"Component maps have the same batch shapes, but {batch_shapes=}."
+            )
+        return next(iter(batch_shapes))
 
 
 class OuterProductFeatureMap(FeatureMap, FeatureMapList):
@@ -248,9 +201,9 @@ class KernelFeatureMap(FeatureMap):
 
         Args:
             kernel: The kernel :math:`k` used to define the feature map.
-            num_outputs: The number of features produced by the module.
             input_transform: An optional input transform for the module.
             output_transform: An optional output transform for the module.
+            ignore_active_dims: Whether to ignore the kernel's active_dims.
         """
         if not ignore_active_dims and kernel.active_dims is not None:
             feature_selector = FeatureSelector(kernel.active_dims)
@@ -284,19 +237,14 @@ class KernelEvaluationMap(KernelFeatureMap):
         self,
         kernel: kernels.Kernel,
         points: Tensor,
-        input_transform: TInputTransform | None = None,
-        output_transform: TOutputTransform | None = None,
+        input_transform: Optional[TInputTransform] = None,
+        output_transform: Optional[TOutputTransform] = None,
     ) -> None:
-        r"""Initializes a KernelEvaluationMap instance:
-
-        .. code-block:: text
-
-            feature_map(x) = output_transform(kernel(input_transform(x), points)).
+        r"""Initializes a KernelEvaluationMap instance.
 
         Args:
             kernel: The kernel :math:`k` used to define the feature map.
             points: A tensor passed as the kernel's second argument.
-            num_outputs: The number of features produced by the module.
             input_transform: An optional input transform for the module.
             output_transform: An optional output transform for the module.
         """
@@ -319,7 +267,7 @@ class KernelEvaluationMap(KernelFeatureMap):
         )
         self.points = points
 
-    def forward(self, x: Tensor) -> Tensor | LinearOperator:
+    def forward(self, x: Tensor) -> Union[Tensor, LinearOperator]:
         return self.kernel(x, self.points)
 
     @property
@@ -337,9 +285,9 @@ class FourierFeatureMap(KernelFeatureMap):
         self,
         kernel: kernels.Kernel,
         weight: Tensor,
-        bias: Tensor | None = None,
-        input_transform: TInputTransform | None = None,
-        output_transform: TOutputTransform | None = None,
+        bias: Optional[Tensor] = None,
+        input_transform: Optional[TInputTransform] = None,
+        output_transform: Optional[TOutputTransform] = None,
     ) -> None:
         r"""Initializes a FourierFeatureMap instance:
 
@@ -349,7 +297,6 @@ class FourierFeatureMap(KernelFeatureMap):
 
         Args:
             kernel: The kernel :math:`k` used to define the feature map.
-            num_outputs: The number of features produced by the module.
             weight: A tensor of weights used to linearly combine the module's inputs.
             bias: A tensor of biases to be added to the linearly combined inputs.
             input_transform: An optional input transform for the module.
@@ -362,20 +309,10 @@ class FourierFeatureMap(KernelFeatureMap):
         )
         self.register_buffer("weight", weight)
         self.register_buffer("bias", bias)
-        self.weight = weight
-        self.bias = bias
 
     def forward(self, x: Tensor) -> Tensor:
         out = x @ self.weight.transpose(-2, -1)
         return out if self.bias is None else out + self.bias.unsqueeze(-2)
-
-        # try:
-        #     out2 = out if self.bias is None else out + self.bias.unsqueeze(-2)
-        # except Exception as e:
-        #     print(e)
-        #     breakpoint()
-        #     pass
-        # return out2
 
     @property
     def raw_output_shape(self) -> Size:
@@ -394,7 +331,6 @@ class IndexKernelFeatureMap(KernelFeatureMap):
 
         Args:
             kernel: IndexKernel whose features are to be returned.
-            num_outputs: The number of features produced by the module.
             input_transform: An optional input transform for the module.
                 For kernels with `active_dims`, defaults to a FeatureSelector
                 instance that extracts the relevant input features.
@@ -441,7 +377,7 @@ class LinearKernelFeatureMap(KernelFeatureMap):
 
         Args:
             kernel: LinearKernel whose features are to be returned.
-            num_outputs: The number of features produced by the module.
+            raw_output_shape: The shape of the raw output features.
             input_transform: An optional input transform for the module.
                 For kernels with `active_dims`, defaults to a FeatureSelector
                 instance that extracts the relevant input features.
@@ -477,7 +413,6 @@ class MultitaskKernelFeatureMap(KernelFeatureMap):
 
         Args:
             kernel: MultitaskKernel whose features are to be returned.
-            num_outputs: The number of features produced by the module.
             data_feature_map: Representation of the multitask kernel's
                 `data_covar_module` as a FeatureMap.
             input_transform: An optional input transform for the module.

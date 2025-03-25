@@ -6,12 +6,16 @@
 
 
 from botorch.sampling.pathwise.features import (
+    DirectSumFeatureMap,
     FeatureMap,
-    FeatureMapList,
     FourierFeatureMap,
     gen_kernel_feature_map,
+    IndexKernelFeatureMap,
     KernelEvaluationMap,
     KernelFeatureMap,
+    LinearKernelFeatureMap,
+    MultitaskKernelFeatureMap,
+    OuterProductFeatureMap,
 )
 from botorch.sampling.pathwise.paths import (
     GeneralizedLinearPath,
@@ -29,18 +33,22 @@ from botorch.sampling.pathwise.update_strategies import gaussian_update
 
 
 __all__ = [
+    "DirectSumFeatureMap",
     "draw_matheron_paths",
     "draw_kernel_feature_paths",
     "FeatureMap",
-    "FeatureMapList",
     "FourierFeatureMap",
     "gen_kernel_feature_map",
     "get_matheron_path_model",
     "gaussian_update",
     "GeneralizedLinearPath",
+    "IndexKernelFeatureMap",
     "KernelEvaluationMap",
     "KernelFeatureMap",
+    "LinearKernelFeatureMap",
     "MatheronPath",
+    "MultitaskKernelFeatureMap",
+    "OuterProductFeatureMap",
     "SamplePath",
     "PathDict",
     "PathList",

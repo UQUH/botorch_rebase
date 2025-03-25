@@ -7,18 +7,26 @@
 
 from botorch.sampling.pathwise.features.generators import gen_kernel_feature_map
 from botorch.sampling.pathwise.features.maps import (
+    DirectSumFeatureMap,
     FeatureMap,
-    FeatureMapList,
     FourierFeatureMap,
+    IndexKernelFeatureMap,
     KernelEvaluationMap,
     KernelFeatureMap,
+    LinearKernelFeatureMap,
+    MultitaskKernelFeatureMap,
+    OuterProductFeatureMap,
 )
 
 __all__ = [
+    "DirectSumFeatureMap",
     "FeatureMap",
-    "FeatureMapList",
     "FourierFeatureMap",
     "gen_kernel_feature_map",
+    "IndexKernelFeatureMap",
     "KernelEvaluationMap",
     "KernelFeatureMap",
+    "LinearKernelFeatureMap",
+    "MultitaskKernelFeatureMap",
+    "OuterProductFeatureMap",
 ]

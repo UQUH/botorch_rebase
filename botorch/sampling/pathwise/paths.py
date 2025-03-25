@@ -7,33 +7,31 @@
 from __future__ import annotations
 
 from abc import ABC
-from string import ascii_letters
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Union
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from typing import Any
 
 from botorch.exceptions.errors import UnsupportedError
 from botorch.sampling.pathwise.features import FeatureMap
 from botorch.sampling.pathwise.utils import (
-    ModuleDictMixin,
-    ModuleListMixin,
     TInputTransform,
     TOutputTransform,
     TransformedModuleMixin,
 )
-from torch import einsum, Tensor
-from torch.nn import Module, Parameter
+from torch import Tensor
+from torch.nn import Module, ModuleDict, ModuleList, Parameter
 
 
 class SamplePath(ABC, TransformedModuleMixin, Module):
     r"""Abstract base class for Botorch sample paths."""
 
 
-class PathDict(SamplePath, ModuleDictMixin[SamplePath]):
+class PathDict(SamplePath):
     r"""A dictionary of SamplePaths."""
 
     def __init__(
         self,
         paths: Mapping[str, SamplePath] | None = None,
-        reducer: Optional[Callable[[List[Tensor]], Tensor]] = None,
+        join: Callable[[list[Tensor]], Tensor] | None = None,
         input_transform: TInputTransform | None = None,
         output_transform: TOutputTransform | None = None,
     ) -> None:
@@ -41,35 +39,59 @@ class PathDict(SamplePath, ModuleDictMixin[SamplePath]):
 
         Args:
             paths: An optional mapping of strings to sample paths.
-            reducer: An optional callable used to combine each path's outputs.
+            join: An optional callable used to combine each path's outputs.
             input_transform: An optional input transform for the module.
             output_transform: An optional output transform for the module.
         """
-        if reducer is None and output_transform is not None:
-            raise UnsupportedError(
-                "`output_transform` must be preceded by a `reducer`."
-            )
+        if join is None and output_transform is not None:
+            raise UnsupportedError("Output transforms must be preceded by a join rule.")
 
-        SamplePath.__init__(self)
-        ModuleDictMixin.__init__(self, attr_name="paths", modules=paths)
-        self.reducer = reducer
+        super().__init__()
+        self.join = join
         self.input_transform = input_transform
         self.output_transform = output_transform
-
+        self.paths = (
+            paths
+            if isinstance(paths, ModuleDict)
+            else ModuleDict({} if paths is None else paths)
+        )
 
     def forward(self, x: Tensor, **kwargs: Any) -> Tensor | dict[str, Tensor]:
-        out = (path(x, **kwargs) for path in self.values())
-        return dict(zip(self, out)) if self.reducer is None else self.reducer(list(out))
+        out = [path(x, **kwargs) for path in self.paths.values()]
+        return dict(zip(self.paths, out)) if self.join is None else self.join(out)
+
+    def items(self) -> Iterable[tuple[str, SamplePath]]:
+        return self.paths.items()
+
+    def keys(self) -> Iterable[str]:
+        return self.paths.keys()
+
+    def values(self) -> Iterable[SamplePath]:
+        return self.paths.values()
+
+    def __len__(self) -> int:
+        return len(self.paths)
+
+    def __iter__(self) -> Iterator[SamplePath]:
+        yield from self.paths
+
+    def __delitem__(self, key: str) -> None:
+        del self.paths[key]
+
+    def __getitem__(self, key: str) -> SamplePath:
+        return self.paths[key]
+
+    def __setitem__(self, key: str, val: SamplePath) -> None:
+        self.paths[key] = val
 
 
-
-class PathList(SamplePath, ModuleListMixin[SamplePath]):
+class PathList(SamplePath):
     r"""A list of SamplePaths."""
 
     def __init__(
         self,
         paths: Iterable[SamplePath] | None = None,
-        reducer: Optional[Callable[[List[Tensor]], Tensor]] = None,
+        join: Callable[[list[Tensor]], Tensor] | None = None,
         input_transform: TInputTransform | None = None,
         output_transform: TOutputTransform | None = None,
     ) -> None:
@@ -77,25 +99,42 @@ class PathList(SamplePath, ModuleListMixin[SamplePath]):
 
         Args:
             paths: An optional iterable of sample paths.
-            reducer: An optional callable used to combine each path's outputs.
+            join: An optional callable used to combine each path's outputs.
             input_transform: An optional input transform for the module.
             output_transform: An optional output transform for the module.
         """
-        if reducer is None and output_transform is not None:
-            raise UnsupportedError(
-                "`output_transform` must be preceded by a `reducer`."
-            )
 
-        SamplePath.__init__(self)
-        ModuleListMixin.__init__(self, attr_name="paths", modules=paths)
-        self.reducer = reducer
+        if join is None and output_transform is not None:
+            raise UnsupportedError("Output transforms must be preceded by a join rule.")
+
+        super().__init__()
+        self.join = join
         self.input_transform = input_transform
         self.output_transform = output_transform
-
+        self.paths = (
+            paths
+            if isinstance(paths, ModuleList)
+            else ModuleList({} if paths is None else paths)
+        )
 
     def forward(self, x: Tensor, **kwargs: Any) -> Tensor | list[Tensor]:
-        outputs = [path(x, **kwargs) for path in self]
-        return outputs if self.reducer is None else self.reducer(outputs)
+        out = [path(x, **kwargs) for path in self.paths]
+        return out if self.join is None else self.join(out)
+
+    def __len__(self) -> int:
+        return len(self.paths)
+
+    def __iter__(self) -> Iterator[SamplePath]:
+        yield from self.paths
+
+    def __delitem__(self, key: int) -> None:
+        del self.paths[key]
+
+    def __getitem__(self, key: int) -> SamplePath:
+        return self.paths[key]
+
+    def __setitem__(self, key: int, val: SamplePath) -> None:
+        self.paths[key] = val
 
 
 class GeneralizedLinearPath(SamplePath):
@@ -133,10 +172,6 @@ class GeneralizedLinearPath(SamplePath):
         self.output_transform = output_transform
 
     def forward(self, x: Tensor, **kwargs) -> Tensor:
-        features = self.feature_map(x, **kwargs)
-        output = (features @ self.weight.unsqueeze(-1)).squeeze(-1)
-        ndim = len(self.feature_map.output_shape)
-        if ndim > 1:  # sum over the remaining feature dimensions
-            output = einsum(f"...{ascii_letters[:ndim - 1]}->...", output)
-
-        return output if self.bias_module is None else output + self.bias_module(x)
+        feat = self.feature_map(x, **kwargs)
+        out = (feat @ self.weight.unsqueeze(-1)).squeeze(-1)
+        return out if self.bias_module is None else out + self.bias_module(x)

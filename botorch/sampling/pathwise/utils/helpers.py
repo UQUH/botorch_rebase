@@ -6,19 +6,7 @@
 
 from __future__ import annotations
 
-from sys import maxsize
-from typing import (
-    Callable,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    overload,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import List, Optional, overload, Tuple, Type, Union
 
 import torch
 from botorch.models.approximate_gp import SingleTaskVariationalGP
@@ -26,137 +14,44 @@ from botorch.models.gpytorch import GPyTorchModel
 from botorch.models.model import Model, ModelList
 from botorch.models.transforms.input import InputTransform
 from botorch.models.transforms.outcome import OutcomeTransform
-from botorch.sampling.pathwise.utils.mixins import TransformedModuleMixin
-from botorch.sampling.pathwise.utils.transforms import (
-    ChainedTransform,
-    OutcomeUntransformer,
-    TensorTransform,
-)
+from botorch.sampling.pathwise.utils.transforms import OutcomeUntransformer
 from botorch.utils.dispatcher import Dispatcher
 from botorch.utils.types import MISSING
-from gpytorch import kernels
-from gpytorch.kernels.kernel import Kernel
-from linear_operator import LinearOperator
+from gpytorch.kernels import Kernel, RBFKernel, ScaleKernel
 from torch import Size, Tensor
 
-TKernel = TypeVar("TKernel", bound=Kernel)
 GetTrainInputs = Dispatcher("get_train_inputs")
 GetTrainTargets = Dispatcher("get_train_targets")
-INF_DIM_KERNELS: Tuple[Type[Kernel]] = (kernels.MaternKernel, kernels.RBFKernel)
 
 
-def kernel_instancecheck(
-    kernel: Kernel,
-    types: Union[TKernel, Tuple[TKernel, ...]],
-    reducer: Callable[[Iterator[bool]], bool] = any,
-    max_depth: int = maxsize,
-) -> bool:
-    if isinstance(kernel, types):
+def kernel_instancecheck(kernel: Kernel, kernel_type: Type[Kernel]) -> bool:
+    """Check if a kernel is an instance of a kernel type, ignoring ScaleKernel wrappers."""
+    if isinstance(kernel, kernel_type):
         return True
-
-    if max_depth == 0 or not isinstance(kernel, Kernel):
-        return False
-
-    return reducer(
-        kernel_instancecheck(module, types, reducer, max_depth - 1)
-        for module in kernel.modules()
-        if module is not kernel and isinstance(module, Kernel)
-    )
+    if isinstance(kernel, ScaleKernel):
+        return kernel_instancecheck(kernel.base_kernel, kernel_type)
+    return False
 
 
-def is_finite_dimensional(kernel: Kernel, max_depth: int = maxsize) -> bool:
-    return not kernel_instancecheck(
-        kernel, types=INF_DIM_KERNELS, reducer=any, max_depth=max_depth
-    )
+def is_finite_dimensional(kernel: Kernel, max_depth: int = -1) -> bool:
+    """Check if a kernel has a finite-dimensional feature map.
 
+    Args:
+        kernel: The kernel to check.
+        max_depth: The maximum depth to search for finite-dimensional kernels.
+            If -1, search all the way down. If 0, only check the top level.
 
-def sparse_block_diag(
-    blocks: Iterable[Tensor],
-    base_ndim: int = 2,
-) -> Tensor:
-    device = next(iter(blocks)).device
-    values = []
-    indices = []
-    shape = torch.zeros(base_ndim, 1, dtype=torch.long, device=device)
-    batch_shapes = []
-    for blk in blocks:
-        batch_shapes.append(blk.shape[:-base_ndim])
-        if isinstance(blk, LinearOperator):
-            blk = blk.to_dense()
-
-        _blk = (blk if blk.is_sparse else blk.to_sparse()).coalesce()
-        values.append(_blk.values())
-
-        idx = _blk.indices()
-        idx[-base_ndim:, :] += shape
-        indices.append(idx)
-        for i, size in enumerate(blk.shape[-base_ndim:]):
-            shape[i] += size
-
-    return torch.sparse_coo_tensor(
-        indices=torch.concat(indices, dim=-1),
-        values=torch.concat(values),
-        size=Size((*torch.broadcast_shapes(*batch_shapes), *shape.squeeze(-1))),
-    )
-
-
-def untransform_shape(
-    transform: Union[TensorTransform, InputTransform, OutcomeTransform],
-    shape: Size,
-    device: Optional[torch.device] = None,
-    dtype: Optional[torch.dtype] = None,
-) -> Size:
-    if transform is None:
-        return shape
-
-    test_case = torch.empty(shape, device=device, dtype=dtype)
-    if isinstance(transform, OutcomeTransform):
-        result, _ = transform.untransform(test_case)
-    elif isinstance(transform, InputTransform):
-        result = transform.untransform(test_case)
-    else:
-        result = transform(test_case)
-
-    # TODO: This function assumes that dimensionality remains unchanged
-    return result.shape[-test_case.ndim :]
-
-
-def append_transform(
-    module: TransformedModuleMixin,
-    attr_name: str,
-    transform: Union[InputTransform, OutcomeTransform, TensorTransform],
-) -> None:
-    other = getattr(module, attr_name, None)
-    if other is None:
-        setattr(module, attr_name, transform)
-    else:
-        setattr(module, attr_name, ChainedTransform(other, transform))
-
-
-def prepend_transform(
-    module: TransformedModuleMixin,
-    attr_name: str,
-    transform: Union[InputTransform, OutcomeTransform, TensorTransform],
-) -> None:
-    other = getattr(module, attr_name, None)
-    if other is None:
-        setattr(module, attr_name, transform)
-    else:
-        setattr(module, attr_name, ChainedTransform(transform, other))
-
-
-def get_input_transform(model: GPyTorchModel) -> Optional[InputTransform]:
-    r"""Returns a model's input_transform or None."""
-    return getattr(model, "input_transform", None)
-
-
-def get_output_transform(model: GPyTorchModel) -> Optional[OutcomeUntransformer]:
-    r"""Returns a wrapped version of a model's outcome_transform or None."""
-    transform = getattr(model, "outcome_transform", None)
-    if transform is None:
-        return None
-
-    return OutcomeUntransformer(transform=transform, num_outputs=model.num_outputs)
+    Returns:
+        True if the kernel has a finite-dimensional feature map, False otherwise.
+    """
+    # TODO: Add support for more kernels
+    if max_depth == 0:
+        return not kernel_instancecheck(kernel, RBFKernel)
+    
+    if isinstance(kernel, ScaleKernel):
+        return is_finite_dimensional(kernel.base_kernel, max_depth=max_depth-1 if max_depth > 0 else -1)
+    
+    return not kernel_instancecheck(kernel, RBFKernel)
 
 
 def get_kernel_num_inputs(
@@ -178,6 +73,20 @@ def get_kernel_num_inputs(
             )
         return default
     return num_ambient_inputs
+
+
+def get_input_transform(model: GPyTorchModel) -> Optional[InputTransform]:
+    r"""Returns a model's input_transform or None."""
+    return getattr(model, "input_transform", None)
+
+
+def get_output_transform(model: GPyTorchModel) -> Optional[OutcomeUntransformer]:
+    r"""Returns a wrapped version of a model's outcome_transform or None."""
+    transform = getattr(model, "outcome_transform", None)
+    if transform is None:
+        return None
+
+    return OutcomeUntransformer(transform=transform, num_outputs=model.num_outputs)
 
 
 @overload
@@ -282,3 +191,24 @@ def _get_train_targets_ModelList(
     model: ModelList, transformed: bool = False
 ) -> List[...]:
     return [get_train_targets(m, transformed=transformed) for m in model.models]
+
+
+def untransform_shape(
+    transform: Union[InputTransform, OutcomeTransform],
+    shape: Size,
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = None,
+) -> Size:
+    if transform is None:
+        return shape
+
+    test_case = torch.empty(shape, device=device, dtype=dtype)
+    if isinstance(transform, OutcomeTransform):
+        result, _ = transform.untransform(test_case)
+    elif isinstance(transform, InputTransform):
+        result = transform.untransform(test_case)
+    else:
+        result = transform(test_case)
+
+    # TODO: This function assumes that dimensionality remains unchanged
+    return result.shape[-test_case.ndim :] 

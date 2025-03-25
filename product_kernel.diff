@@ -1,0 +1,4321 @@
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/__init__.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/__init__.py
+--- a/fbcode/pytorch/botorch/botorch/sampling/pathwise/__init__.py
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/__init__.py
+@@ -6,7 +6,10 @@
+
+
+ from botorch.sampling.pathwise.features import (
+-    gen_kernel_features,
++    FeatureMap,
++    FeatureMapList,
++    FourierFeatureMap,
++    gen_kernel_feature_map,
+     KernelEvaluationMap,
+     KernelFeatureMap,
+ )
+@@ -27,7 +30,10 @@
+ __all__ = [
+     "draw_matheron_paths",
+     "draw_kernel_feature_paths",
+-    "gen_kernel_features",
++    "FeatureMap",
++    "FeatureMapList",
++    "FourierFeatureMap",
++    "gen_kernel_feature_map",
+     "gaussian_update",
+     "GeneralizedLinearPath",
+     "KernelEvaluationMap",
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/__init__.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/__init__.py
+--- a/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/__init__.py
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/__init__.py
+@@ -5,16 +5,20 @@
+ # LICENSE file in the root directory of this source tree.
+
+
+-from botorch.sampling.pathwise.features.generators import gen_kernel_features
++from botorch.sampling.pathwise.features.generators import gen_kernel_feature_map
+ from botorch.sampling.pathwise.features.maps import (
+     FeatureMap,
++    FeatureMapList,
++    FourierFeatureMap,
+     KernelEvaluationMap,
+     KernelFeatureMap,
+ )
+
+ __all__ = [
+     "FeatureMap",
+-    "gen_kernel_features",
++    "FeatureMapList",
++    "FourierFeatureMap",
++    "gen_kernel_feature_map",
+     "KernelEvaluationMap",
+     "KernelFeatureMap",
+ ]
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/generators.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/generators.py
+--- a/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/generators.py
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/generators.py
+@@ -16,106 +16,270 @@
+
+ from __future__ import annotations
+
+-from typing import Any, Callable
++from math import pi
++from typing import Any, Callable, Iterable, Optional
+
+ import torch
+ from botorch.exceptions.errors import UnsupportedError
+-from botorch.sampling.pathwise.features.maps import KernelFeatureMap
++from botorch.sampling.pathwise.features import maps
+ from botorch.sampling.pathwise.utils import (
+-    ChainedTransform,
+-    FeatureSelector,
+-    InverseLengthscaleTransform,
+-    OutputscaleTransform,
+-    SineCosineTransform,
++    append_transform,
++    get_kernel_num_inputs,
++    is_finite_dimensional,
++    prepend_transform,
++    transforms,
+ )
+ from botorch.utils.dispatcher import Dispatcher
+ from botorch.utils.sampling import draw_sobol_normal_samples
++from botorch.utils.types import DEFAULT
+ from gpytorch import kernels
+-from gpytorch.kernels.kernel import Kernel
+ from torch import Size, Tensor
+ from torch.distributions import Gamma
+
+-TKernelFeatureMapGenerator = Callable[[Kernel, int, int], KernelFeatureMap]
+-GenKernelFeatures = Dispatcher("gen_kernel_features")
++TKernelFeatureMapGenerator = Callable[[kernels.Kernel, int, int], maps.KernelFeatureMap]
++GenKernelFeatureMap = Dispatcher("gen_kernel_feature_map")
+
+
+-def gen_kernel_features(
++def gen_kernel_feature_map(
+     kernel: kernels.Kernel,
+-    num_inputs: int,
+-    num_outputs: int,
++    num_random_features: int = 1024,
++    num_ambient_inputs: Optional[int] = None,
+     **kwargs: Any,
+-) -> KernelFeatureMap:
++) -> maps.KernelFeatureMap:
+     r"""Generates a feature map :math:`\phi: \mathcal{X} \to \mathbb{R}^{n}` such that
+     :math:`k(x, x') ≈ \phi(x)^{T} \phi(x')`. For stationary kernels :math:`k`, defaults
+     to the method of random Fourier features. For more details, see [rahimi2007random]_
+     and [sutherland2015error]_.
+
+     Args:
+-        kernel: The kernel :math:`k` to be represented via a finite-dim basis.
+-        num_inputs: The number of input features.
+-        num_outputs: The number of kernel features.
++        kernel: The kernel :math:`k` to be represented via a feature map.
++        num_random_features: The number of random features used to estimate kernels
++            that cannot be exactly represented as finite-dimensional feature maps.
++        num_ambient_inputs: The number of ambient input features. Typically acts as a
++            required argument for kernels with lengthscales whose :code:`active_dims`
++            and :code:`ard_num_dims` attributes are both None.
++        **kwargs: Additional keyword arguments are passed to subroutines.
+     """
+-    return GenKernelFeatures(
++    return GenKernelFeatureMap(
+         kernel,
+-        num_inputs=num_inputs,
+-        num_outputs=num_outputs,
++        num_ambient_inputs=num_ambient_inputs,
++        num_random_features=num_random_features,
+         **kwargs,
+     )
+
+
++@GenKernelFeatureMap.register(kernels.ScaleKernel)
++def _gen_kernel_feature_map_scale(
++    kernel: kernels.ScaleKernel,
++    *,
++    num_ambient_inputs: Optional[int] = None,
++    **kwargs: Any,
++) -> maps.KernelFeatureMap:
++
++    active_dims = kernel.active_dims
++    num_scale_kernel_inputs = get_kernel_num_inputs(
++        kernel=kernel,
++        num_ambient_inputs=num_ambient_inputs,
++        default=None,
++    )
++    feature_map = gen_kernel_feature_map(
++        kernel.base_kernel, num_ambient_inputs=num_scale_kernel_inputs, **kwargs
++    )
++
++    # Maybe include a transform that extract relevant input features
++    if active_dims is not None and active_dims is not kernel.base_kernel.active_dims:
++        append_transform(
++            module=feature_map,
++            attr_name="input_transform",
++            transform=transforms.FeatureSelector(indices=active_dims),
++        )
++
++    # Include a transform that multiplies by the square root of the kernel's outputscale
++    prepend_transform(
++        module=feature_map,
++        attr_name="output_transform",
++        transform=transforms.OutputscaleTransform(kernel),
++    )
++    return feature_map
++
++
++@GenKernelFeatureMap.register(kernels.AdditiveKernel)
++def _gen_kernel_feature_map_additive(
++    kernel: kernels.AdditiveKernel,
++    sub_kernels: Optional[Iterable[kernels.Kernel]] = None,
++    **kwargs: Any,
++) -> maps.DirectSumFeatureMap:
++    feature_maps = [
++        gen_kernel_feature_map(kernel=sub_kernel, **kwargs)
++        for sub_kernel in (kernel.kernels if sub_kernels is None else sub_kernels)
++    ]
++    # Return direct sum `concat([f(x) for f in feature_maps], -1)`
++    # Note: Direct sums only translate to concatenations for vector-valued feature maps
++    return maps.DirectSumFeatureMap(feature_maps=feature_maps)
++
++
++@GenKernelFeatureMap.register(kernels.ProductKernel)
++def _gen_kernel_feature_map_product(
++    kernel: kernels.ProductKernel,
++    sub_kernels: Optional[Iterable[kernels.Kernel]] = None,
++    cosine_only: Optional[bool] = DEFAULT,
++    num_random_features: Optional[int] = None,
++    **kwargs: Any,
++) -> maps.OuterProductFeatureMap:
++    sub_kernels = kernel.kernels if sub_kernels is None else sub_kernels
++    if cosine_only is DEFAULT:
++        # Note: We need to set `cosine_only=True` here in order to take the element-wise
++        # product of features below. Otherwise, we would need to take the tensor product
++        # of each pair of sine and cosine features.
++        cosine_only = sum(not is_finite_dimensional(k) for k in sub_kernels) > 1
++
++    # Generate feature maps for each sub-kernel
++    sub_maps = []
++    random_maps = []
++    for sub_kernel in sub_kernels:
++        sub_map = gen_kernel_feature_map(
++            kernel=sub_kernel,
++            cosine_only=cosine_only,
++            num_random_features=num_random_features,
++            random_feature_scale=1.0,  # we rescale once at the end
++            **kwargs,
++        )
++        if is_finite_dimensional(sub_kernel):
++            sub_maps.append(sub_map)
++        else:
++            random_maps.append(sub_map)
++
++    # Define element-wise product of random feature maps
++    if random_maps:
++        random_map = (
++            next(iter(random_maps))
++            if len(random_maps) == 1
++            else maps.HadamardProductFeatureMap(feature_maps=random_maps)
++        )
++        constant = torch.tensor(
++            num_random_features**-0.5, device=kernel.device, dtype=kernel.dtype
++        )
++        prepend_transform(
++            module=random_map,
++            attr_name="output_transform",
++            transform=transforms.ConstantMulTransform(constant),
++        )
++        sub_maps.append(random_map)
++
++    # Return outer product `einsum("i,j,k->ijk", ...).view(-1)`
++    return maps.OuterProductFeatureMap(feature_maps=sub_maps)
++
++
++@GenKernelFeatureMap.register(kernels.IndexKernel)
++def _gen_kernel_feature_map_index(
++    kernel: kernels.IndexKernel, **ignore: Any
++) -> maps.IndexKernelFeatureMap:
++    return maps.IndexKernelFeatureMap(kernel=kernel)
++
++
++@GenKernelFeatureMap.register(kernels.LinearKernel)
++def _gen_kernel_feature_map_linear(
++    kernel: kernels.LinearKernel,
++    *,
++    num_inputs: Optional[int] = None,
++    **ignore: Any,
++) -> maps.LinearKernelFeatureMap:
++    num_features = get_kernel_num_inputs(kernel=kernel, num_ambient_inputs=num_inputs)
++    return maps.LinearKernelFeatureMap(
++        kernel=kernel, raw_output_shape=Size([num_features])
++    )
++
++
++@GenKernelFeatureMap.register(kernels.MultitaskKernel)
++def _gen_kernel_feature_map_multitask(
++    kernel: kernels.MultitaskKernel, **kwargs: Any
++) -> maps.MultitaskKernelFeatureMap:
++    # Generate a feature map for the data kernel
++    data_feature_map = gen_kernel_feature_map(kernel.data_covar_module, **kwargs)
++    if len(data_feature_map.output_shape) != 1:
++        raise NotImplementedError  # TODO: Test what still works and give a hint
++
++    return maps.MultitaskKernelFeatureMap(
++        kernel=kernel, data_feature_map=data_feature_map
++    )
++
++
++@GenKernelFeatureMap.register(kernels.LCMKernel)
++def _gen_kernel_feature_map_lcm(
++    kernel: kernels.LCMKernel, **kwargs: Any
++) -> maps.DirectSumFeatureMap:
++    return _gen_kernel_feature_map_additive(
++        kernel=kernel, sub_kernels=kernel.covar_module_list, **kwargs
++    )
++
++
+ def _gen_fourier_features(
+     kernel: kernels.Kernel,
+     weight_generator: Callable[[Size], Tensor],
+-    num_inputs: int,
+-    num_outputs: int,
+-) -> KernelFeatureMap:
++    num_random_features: int,
++    num_inputs: Optional[int] = None,
++    random_feature_scale: Optional[float] = None,
++    cosine_only: bool = False,
++    **ignore: Any,
++) -> maps.FourierFeatureMap:
+     r"""Generate a feature map :math:`\phi: \mathcal{X} \to \mathbb{R}^{2l}` that
+     approximates a stationary kernel so that :math:`k(x, x') ≈ \phi(x)^\top \phi(x')`.
+
+-    Following [sutherland2015error]_, we represent complex exponentials by pairs of
+-    basis functions :math:`\phi_{i}(x) = \sin(x^\top w_{i})` and
++    Following [sutherland2015error]_, we default to representing complex exponentials
++    by pairs of basis functions :math:`\phi_{i}(x) = \sin(x^\top w_{i})` and
+     :math:`\phi_{i + l} = \cos(x^\top w_{i}).
+
+     Args:
+         kernel: A stationary kernel :math:`k(x, x') = k(x - x')`.
+         weight_generator: A callable used to generate weight vectors :math:`w`.
+-        num_inputs: The number of input features.
+-        num_outputs: The number of Fourier features.
++        num_inputs: The number of ambient input features.
++        num_random_features: The number of random Fourier features.
++        random_feature_scale: Multiplicative constant for the feature map :math:`\phi`.
++            Defaults to :code:`num_random_features ** -0.5` so that
++            :math:`\phi(x)^\top \phi(x') ≈ k(x, x')`.
++        cosine_only: Specifies whether or not to use cosine features with a random
++            phase instead of paired sine and cosine features.
+     """
+-    if num_outputs % 2:
+-        raise UnsupportedError(
+-            f"Expected an even number of output features, but received {num_outputs=}."
+-        )
+-
+-    input_transform = InverseLengthscaleTransform(kernel)
++    tkwargs = {"device": kernel.device, "dtype": kernel.dtype}
++    num_inputs = get_kernel_num_inputs(kernel, num_ambient_inputs=num_inputs)
++    input_transform = transforms.InverseLengthscaleTransform(kernel)
+     if kernel.active_dims is not None:
+         num_inputs = len(kernel.active_dims)
+-        input_transform = ChainedTransform(
+-            input_transform, FeatureSelector(indices=kernel.active_dims)
++
++    constant = torch.tensor(
++        2**0.5 * (random_feature_scale or num_random_features**-0.5), **tkwargs
++    )
++    output_transforms = [transforms.ConstantMulTransform(constant)]
++    if cosine_only:
++        bias = 2 * pi * torch.rand(num_random_features, **tkwargs)
++        num_raw_features = num_random_features
++        output_transforms.append(transforms.CosineTransform())
++    elif num_random_features % 2:
++        raise UnsupportedError(
++            f"Expected an even number of random features, but {num_random_features=}."
+         )
++    else:
++        bias = None
++        num_raw_features = num_random_features // 2
++        output_transforms.append(transforms.SineCosineTransform())
+
+     weight = weight_generator(
+-        Size([kernel.batch_shape.numel() * num_outputs // 2, num_inputs])
+-    ).reshape(*kernel.batch_shape, num_outputs // 2, num_inputs)
++        Size([kernel.batch_shape.numel() * num_raw_features, num_inputs])
++    ).reshape(*kernel.batch_shape, num_raw_features, num_inputs)
+
+-    output_transform = SineCosineTransform(
+-        torch.tensor((2 / num_outputs) ** 0.5, device=kernel.device, dtype=kernel.dtype)
+-    )
+-    return KernelFeatureMap(
++    return maps.FourierFeatureMap(
+         kernel=kernel,
+         weight=weight,
++        bias=bias,
+         input_transform=input_transform,
+-        output_transform=output_transform,
++        output_transform=transforms.ChainedTransform(*output_transforms),
+     )
+
+
+-@GenKernelFeatures.register(kernels.RBFKernel)
+-def _gen_kernel_features_rbf(
+-    kernel: kernels.RBFKernel,
+-    *,
+-    num_inputs: int,
+-    num_outputs: int,
+-) -> KernelFeatureMap:
++@GenKernelFeatureMap.register(kernels.RBFKernel)
++def _gen_kernel_feature_map_rbf(
++    kernel: kernels.RBFKernel, **kwargs: Any
++) -> maps.FourierFeatureMap:
+     def _weight_generator(shape: Size) -> Tensor:
+         try:
+             n, d = shape
+@@ -127,25 +291,19 @@
+         return draw_sobol_normal_samples(
+             n=n,
+             d=d,
+-            device=kernel.lengthscale.device,
+-            dtype=kernel.lengthscale.dtype,
++            device=kernel.device,
++            dtype=kernel.dtype,
+         )
+
+     return _gen_fourier_features(
+-        kernel=kernel,
+-        weight_generator=_weight_generator,
+-        num_inputs=num_inputs,
+-        num_outputs=num_outputs,
++        kernel=kernel, weight_generator=_weight_generator, **kwargs
+     )
+
+
+-@GenKernelFeatures.register(kernels.MaternKernel)
+-def _gen_kernel_features_matern(
+-    kernel: kernels.MaternKernel,
+-    *,
+-    num_inputs: int,
+-    num_outputs: int,
+-) -> KernelFeatureMap:
++@GenKernelFeatureMap.register(kernels.MaternKernel)
++def _gen_kernel_feature_map_matern(
++    kernel: kernels.MaternKernel, **kwargs: Any
++) -> maps.FourierFeatureMap:
+     def _weight_generator(shape: Size) -> Tensor:
+         try:
+             n, d = shape
+@@ -154,40 +312,12 @@
+                 f"Expected `shape` to be 2-dimensional, but {len(shape)=}."
+             )
+
+-        dtype = kernel.lengthscale.dtype
+-        device = kernel.lengthscale.device
++        dtype = kernel.dtype
++        device = kernel.device
+         nu = torch.tensor(kernel.nu, device=device, dtype=dtype)
+         normals = draw_sobol_normal_samples(n=n, d=d, device=device, dtype=dtype)
+         return Gamma(nu, nu).rsample((n, 1)).rsqrt() * normals
+
+     return _gen_fourier_features(
+-        kernel=kernel,
+-        weight_generator=_weight_generator,
+-        num_inputs=num_inputs,
+-        num_outputs=num_outputs,
+-    )
+-
+-
+-@GenKernelFeatures.register(kernels.ScaleKernel)
+-def _gen_kernel_features_scale(
+-    kernel: kernels.ScaleKernel,
+-    *,
+-    num_inputs: int,
+-    num_outputs: int,
+-) -> KernelFeatureMap:
+-    active_dims = kernel.active_dims
+-    feature_map = gen_kernel_features(
+-        kernel.base_kernel,
+-        num_inputs=num_inputs if active_dims is None else len(active_dims),
+-        num_outputs=num_outputs,
+-    )
+-
+-    if active_dims is not None and active_dims is not kernel.base_kernel.active_dims:
+-        feature_map.input_transform = ChainedTransform(
+-            feature_map.input_transform, FeatureSelector(indices=active_dims)
+-        )
+-
+-    feature_map.output_transform = ChainedTransform(
+-        OutputscaleTransform(kernel), feature_map.output_transform
++        kernel=kernel, weight_generator=_weight_generator, **kwargs
+     )
+-    return feature_map
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/maps.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/maps.py
+--- a/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/maps.py
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/features/maps.py
+@@ -6,33 +6,284 @@
+
+ from __future__ import annotations
+
+-from typing import Optional, Union
++from abc import abstractmethod
++from itertools import repeat
++from math import prod
++from string import ascii_letters
++from typing import Any, Iterable, List, Optional, Union
+
+ import torch
++from botorch.exceptions.errors import UnsupportedError
+ from botorch.sampling.pathwise.utils import (
++    ModuleListMixin,
++    sparse_block_diag,
+     TInputTransform,
+     TOutputTransform,
+     TransformedModuleMixin,
++    untransform_shape,
++)
++from botorch.sampling.pathwise.utils.transforms import ChainedTransform, FeatureSelector
++from gpytorch import kernels
++from linear_operator.operators import (
++    InterpolatedLinearOperator,
++    KroneckerProductLinearOperator,
++    LinearOperator,
+ )
+-from gpytorch.kernels import Kernel
+-from linear_operator.operators import LinearOperator
+ from torch import Size, Tensor
+ from torch.nn import Module
+
+
+ class FeatureMap(TransformedModuleMixin, Module):
+-    num_outputs: int
++    raw_output_shape: Size
+     batch_shape: Size
+     input_transform: Optional[TInputTransform]
+     output_transform: Optional[TOutputTransform]
++    device: Optional[torch.device]
++    dtype: Optional[torch.dtype]
++
++    @abstractmethod
++    def forward(self, x: Tensor, **kwargs: Any) -> Any:
++        pass
++
++    @property
++    def output_shape(self) -> Size:
++        if self.output_transform is None:
++            return self.raw_output_shape
++
++        return untransform_shape(
++            self.output_transform,
++            self.raw_output_shape,
++            device=self.device,
++            dtype=self.dtype,
++        )
++
++
++class FeatureMapList(Module, ModuleListMixin[FeatureMap]):
++    def __init__(self, feature_maps: Iterable[FeatureMap]):
++        Module.__init__(self)
++        ModuleListMixin.__init__(self, attr_name="feature_maps", modules=feature_maps)
++
++    def forward(self, x: Tensor, **kwargs: Any) -> List[Union[Tensor, LinearOperator]]:
++        return [feature_map(x, **kwargs) for feature_map in self]
++
++    @property
++    def device(self) -> Optional[torch.device]:
++        devices = {feature_map.device for feature_map in self}
++        devices.discard(None)
++        if len(devices) > 1:
++            raise UnsupportedError(f"Feature maps must be colocated, but {devices=}.")
++        return next(iter(devices)) if devices else None
++
++    @property
++    def dtype(self) -> Optional[torch.dtype]:
++        dtypes = {feature_map.dtype for feature_map in self}
++        dtypes.discard(None)
++        if len(dtypes) > 1:
++            raise UnsupportedError(
++                f"Feature maps must have the same data type, but {dtypes=}."
++            )
++        return next(iter(dtypes)) if dtypes else None
++
++
++class DirectSumFeatureMap(FeatureMap, FeatureMapList):
++    r"""Direct sums of features."""
++
++    def __init__(
++        self,
++        feature_maps: Iterable[FeatureMap],
++        input_transform: Optional[TInputTransform] = None,
++        output_transform: Optional[TOutputTransform] = None,
++    ):
++        FeatureMap.__init__(self)
++        FeatureMapList.__init__(self, feature_maps=feature_maps)
++        self.input_transform = input_transform
++        self.output_transform = output_transform
++
++    def forward(self, x: Tensor, **kwargs: Any) -> Tensor:
++        blocks = []
++        shape = self.raw_output_shape
++        ndim = len(shape)
++        for feature_map in self:
++            block = feature_map(x, **kwargs).to_dense()
++            block_ndim = len(feature_map.output_shape)
++            if block_ndim < ndim:
++                tile_shape = shape[-ndim:-block_ndim]
++                num_copies = prod(tile_shape)
++                if num_copies > 1:
++                    block = block * (num_copies**-0.5)
++
++                multi_index = (
++                    ...,
++                    *repeat(None, ndim - block_ndim),
++                    *repeat(slice(None), block_ndim),
++                )
++                block = block[multi_index].expand(
++                    *block.shape[:-block_ndim], *tile_shape, *block.shape[-block_ndim:]
++                )
++            blocks.append(block)
++
++        return torch.concat(blocks, dim=-1)
++
++    @property
++    def raw_output_shape(self) -> Size:
++        map_iter = iter(self)
++        feature_map = next(map_iter)
++        concat_size = feature_map.output_shape[-1]
++        batch_shape = feature_map.output_shape[:-1]
++        for feature_map in map_iter:
++            concat_size += feature_map.output_shape[-1]
++            batch_shape = torch.broadcast_shapes(
++                batch_shape, feature_map.output_shape[:-1]
++            )
++        return Size((*batch_shape, concat_size))
++
++    @property
++    def batch_shape(self) -> Size:
++        batch_shapes = {feature_map.batch_shape for feature_map in self}
++        if len(batch_shapes) > 1:
++            raise ValueError(
++                f"Component maps have the same batch shapes, but {batch_shapes=}."
++            )
++        return next(iter(batch_shapes))
++
++
++class SparseDirectSumFeatureMap(DirectSumFeatureMap):
++    def forward(self, x: Tensor, **kwargs: Any) -> Tensor:
++        blocks = []
++        ndim = max(len(f.output_shape) for f in self)
++        for feature_map in self:
++            block = feature_map(x, **kwargs)
++            block_ndim = len(feature_map.output_shape)
++            if block_ndim == ndim:
++                block = block.to_dense() if isinstance(block, LinearOperator) else block
++                block = block if block.is_sparse else block.to_sparse()
++            else:
++                multi_index = (
++                    ...,
++                    *repeat(None, ndim - block_ndim),
++                    *repeat(slice(None), block_ndim),
++                )
++                block = block.to_dense()[multi_index]
++            blocks.append(block)
++        return sparse_block_diag(blocks, base_ndim=ndim)
+
+
+-class KernelEvaluationMap(FeatureMap):
++class HadamardProductFeatureMap(FeatureMap, FeatureMapList):
++    r"""Hadamard product of features."""
++
++    def __init__(
++        self,
++        feature_maps: Iterable[FeatureMap],
++        input_transform: Optional[TInputTransform] = None,
++        output_transform: Optional[TOutputTransform] = None,
++    ):
++        FeatureMap.__init__(self)
++        FeatureMapList.__init__(self, feature_maps=feature_maps)
++        self.input_transform = input_transform
++        self.output_transform = output_transform
++
++    def forward(self, x: Tensor, **kwargs: Any) -> Tensor:
++        return prod(feature_map(x, **kwargs) for feature_map in self)
++
++    @property
++    def raw_output_shape(self) -> Size:
++        return torch.broadcast_shapes(*(f.output_shape for f in self))
++
++    @property
++    def batch_shape(self) -> Size:
++        batch_shapes = (feature_map.batch_shape for feature_map in self)
++        return torch.broadcast_shapes(*batch_shapes)
++
++
++class OuterProductFeatureMap(FeatureMap, FeatureMapList):
++    r"""Outer product of vector-valued features."""
++
++    def __init__(
++        self,
++        feature_maps: Iterable[FeatureMap],
++        input_transform: Optional[TInputTransform] = None,
++        output_transform: Optional[TOutputTransform] = None,
++    ):
++        FeatureMap.__init__(self)
++        FeatureMapList.__init__(self, feature_maps=feature_maps)
++        self.input_transform = input_transform
++        self.output_transform = output_transform
++
++    def forward(self, x: Tensor, **kwargs: Any) -> Tensor:
++        num_maps = len(self)
++        lhs = (f"...{ascii_letters[i]}" for i in range(num_maps))
++        rhs = f"...{ascii_letters[:num_maps]}"
++        eqn = f"{','.join(lhs)}->{rhs}"
++
++        outputs_iter = (feature_map(x, **kwargs).to_dense() for feature_map in self)
++        output = torch.einsum(eqn, *outputs_iter)
++        return output.view(*output.shape[:-num_maps], -1)
++
++    @property
++    def raw_output_shape(self) -> Size:
++        outer_size = 1
++        batch_shapes = []
++        for feature_map in self:
++            *batch_shape, size = feature_map.output_shape
++            outer_size *= size
++            batch_shapes.append(batch_shape)
++        return Size((*torch.broadcast_shapes(*batch_shapes), outer_size))
++
++    @property
++    def batch_shape(self) -> Size:
++        batch_shapes = (feature_map.batch_shape for feature_map in self)
++        return torch.broadcast_shapes(*batch_shapes)
++
++
++class KernelFeatureMap(FeatureMap):
++    r"""Base class for FeatureMap subclasses that represent kernels."""
++
++    def __init__(
++        self,
++        kernel: kernels.Kernel,
++        input_transform: Optional[TInputTransform] = None,
++        output_transform: Optional[TOutputTransform] = None,
++        ignore_active_dims: bool = False,
++    ) -> None:
++        r"""Initializes a KernelFeatureMap instance.
++
++        Args:
++            kernel: The kernel :math:`k` used to define the feature map.
++            num_outputs: The number of features produced by the module.
++            input_transform: An optional input transform for the module.
++            output_transform: An optional output transform for the module.
++        """
++        if not ignore_active_dims and kernel.active_dims is not None:
++            feature_selector = FeatureSelector(kernel.active_dims)
++            if input_transform is None:
++                input_transform = feature_selector
++            else:
++                input_transform = ChainedTransform(input_transform, feature_selector)
++
++        super().__init__()
++        self.kernel = kernel
++        self.input_transform = input_transform
++        self.output_transform = output_transform
++
++    @property
++    def batch_shape(self) -> Size:
++        return self.kernel.batch_shape
++
++    @property
++    def device(self) -> Optional[torch.device]:
++        return self.kernel.device
++
++    @property
++    def dtype(self) -> Optional[torch.dtype]:
++        return self.kernel.dtype
++
++
++class KernelEvaluationMap(KernelFeatureMap):
+     r"""A feature map defined by centering a kernel at a set of points."""
+
+     def __init__(
+         self,
+-        kernel: Kernel,
++        kernel: kernels.Kernel,
+         points: Tensor,
+         input_transform: Optional[TInputTransform] = None,
+         output_transform: Optional[TOutputTransform] = None,
+@@ -46,9 +297,15 @@
+         Args:
+             kernel: The kernel :math:`k` used to define the feature map.
+             points: A tensor passed as the kernel's second argument.
++            num_outputs: The number of features produced by the module.
+             input_transform: An optional input transform for the module.
+             output_transform: An optional output transform for the module.
+         """
++        if not 1 < points.ndim < len(kernel.batch_shape) + 3:
++            raise RuntimeError(
++                f"Dimension mismatch: {points.ndim=}, but {len(kernel.batch_shape)=}."
++            )
++
+         try:
+             torch.broadcast_shapes(points.shape[:-2], kernel.batch_shape)
+         except RuntimeError:
+@@ -56,31 +313,22 @@
+                 f"Shape mismatch: {points.shape=}, but {kernel.batch_shape=}."
+             )
+
+-        super().__init__()
+-        self.kernel = kernel
++        super().__init__(
++            kernel=kernel,
++            input_transform=input_transform,
++            output_transform=output_transform,
++        )
+         self.points = points
+-        self.input_transform = input_transform
+-        self.output_transform = output_transform
+
+     def forward(self, x: Tensor) -> Union[Tensor, LinearOperator]:
+         return self.kernel(x, self.points)
+
+     @property
+-    def num_outputs(self) -> int:
+-        if self.output_transform is None:
+-            return self.points.shape[-1]
++    def raw_output_shape(self) -> Size:
++        return self.points.shape[-2:-1]
+
+-        canary = torch.empty(
+-            1, self.points.shape[-1], device=self.points.device, dtype=self.points.dtype
+-        )
+-        return self.output_transform(canary).shape[-1]
+-
+-    @property
+-    def batch_shape(self) -> Size:
+-        return self.kernel.batch_shape
+
+-
+-class KernelFeatureMap(FeatureMap):
++class FourierFeatureMap(KernelFeatureMap):
+     r"""Representation of a kernel :math:`k: \mathcal{X}^2 \to \mathbb{R}` as an
+     n-dimensional feature map :math:`\phi: \mathcal{X} \to \mathbb{R}^n` satisfying:
+     :math:`k(x, x') ≈ \phi(x)^\top \phi(x')`.
+@@ -88,13 +336,13 @@
+
+     def __init__(
+         self,
+-        kernel: Kernel,
++        kernel: kernels.Kernel,
+         weight: Tensor,
+         bias: Optional[Tensor] = None,
+         input_transform: Optional[TInputTransform] = None,
+         output_transform: Optional[TOutputTransform] = None,
+     ) -> None:
+-        r"""Initializes a KernelFeatureMap instance:
++        r"""Initializes a FourierFeatureMap instance:
+
+         .. code-block:: text
+
+@@ -102,32 +350,170 @@
+
+         Args:
+             kernel: The kernel :math:`k` used to define the feature map.
++            num_outputs: The number of features produced by the module.
+             weight: A tensor of weights used to linearly combine the module's inputs.
+             bias: A tensor of biases to be added to the linearly combined inputs.
+             input_transform: An optional input transform for the module.
+             output_transform: An optional output transform for the module.
+         """
+-        super().__init__()
+-        self.kernel = kernel
++        super().__init__(
++            kernel=kernel,
++            input_transform=input_transform,
++            output_transform=output_transform,
++        )
+         self.weight = weight
+         self.bias = bias
+-        self.input_transform = input_transform
+-        self.output_transform = output_transform
+
+     def forward(self, x: Tensor) -> Tensor:
+         out = x @ self.weight.transpose(-2, -1)
+-        return out if self.bias is None else out + self.bias
++        return out if self.bias is None else out + self.bias.unsqueeze(-2)
++
++        # try:
++        #     out2 = out if self.bias is None else out + self.bias.unsqueeze(-2)
++        # except Exception as e:
++        #     print(e)
++        #     breakpoint()
++        #     pass
++        # return out2
+
+     @property
+-    def num_outputs(self) -> int:
+-        if self.output_transform is None:
+-            return self.weight.shape[-2]
++    def raw_output_shape(self) -> Size:
++        return self.weight.shape[-2:-1]
++
++
++class IndexKernelFeatureMap(KernelFeatureMap):
++    def __init__(
++        self,
++        kernel: kernels.IndexKernel,
++        input_transform: Optional[TInputTransform] = None,
++        output_transform: Optional[TOutputTransform] = None,
++        ignore_active_dims: bool = False,
++    ) -> None:
++        r"""Initializes an IndexKernelFeatureMap instance:
++
++        Args:
++            kernel: IndexKernel whose features are to be returned.
++            num_outputs: The number of features produced by the module.
++            input_transform: An optional input transform for the module.
++                For kernels with `active_dims`, defaults to a FeatureSelector
++                instance that extracts the relevant input features.
++            output_transform: An optional output transform for the module.
++        """
++        if not isinstance(kernel, kernels.IndexKernel):
++            raise ValueError(f"Expected {kernels.IndexKernel}, but {type(kernel)=}.")
+
+-        canary = torch.empty(
+-            self.weight.shape[-2], device=self.weight.device, dtype=self.weight.dtype
++        super().__init__(
++            kernel=kernel,
++            input_transform=input_transform,
++            output_transform=output_transform,
++            ignore_active_dims=ignore_active_dims,
+         )
+-        return self.output_transform(canary).shape[-1]
++
++    def forward(self, x: Optional[Tensor]) -> LinearOperator:
++        if x is None:
++            return self.kernel.covar_matrix.cholesky()
++
++        i = x.long()
++        j = torch.arange(self.kernel.covar_factor.shape[-1], device=x.device)[..., None]
++        batch = torch.broadcast_shapes(self.batch_shape, i.shape[:-2], j.shape[:-2])
++        return InterpolatedLinearOperator(
++            base_linear_op=self.kernel.covar_matrix.cholesky(),
++            left_interp_indices=i.expand(batch + i.shape[-2:]),
++            right_interp_indices=j.expand(batch + j.shape[-2:]),
++        ).to_dense()
+
+     @property
+-    def batch_shape(self) -> Size:
+-        return self.kernel.batch_shape
++    def raw_output_shape(self) -> Size:
++        return self.kernel.raw_var.shape[-1:]
++
++
++class LinearKernelFeatureMap(KernelFeatureMap):
++    def __init__(
++        self,
++        kernel: kernels.LinearKernel,
++        raw_output_shape: Size,
++        input_transform: Optional[TInputTransform] = None,
++        output_transform: Optional[TOutputTransform] = None,
++        ignore_active_dims: bool = False,
++    ) -> None:
++        r"""Initializes a LinearKernelFeatureMap instance.
++
++        Args:
++            kernel: LinearKernel whose features are to be returned.
++            num_outputs: The number of features produced by the module.
++            input_transform: An optional input transform for the module.
++                For kernels with `active_dims`, defaults to a FeatureSelector
++                instance that extracts the relevant input features.
++            output_transform: An optional output transform for the module.
++        """
++        if not isinstance(kernel, kernels.LinearKernel):
++            raise ValueError(f"Expected {kernels.LinearKernel}, but {type(kernel)=}.")
++
++        super().__init__(
++            kernel=kernel,
++            input_transform=input_transform,
++            output_transform=output_transform,
++            ignore_active_dims=ignore_active_dims,
++        )
++        self.raw_output_shape = raw_output_shape
++
++    def forward(self, x: Tensor) -> Tensor:
++        return self.kernel.variance.sqrt() * x
++
++
++class MultitaskKernelFeatureMap(KernelFeatureMap):
++    r"""Representation of a MultitaskKernel as a feature map."""
++
++    def __init__(
++        self,
++        kernel: kernels.MultitaskKernel,
++        data_feature_map: FeatureMap,
++        input_transform: Optional[TInputTransform] = None,
++        output_transform: Optional[TOutputTransform] = None,
++        ignore_active_dims: bool = False,
++    ) -> None:
++        r"""Initializes a MultitaskKernelFeatureMap instance.
++
++        Args:
++            kernel: MultitaskKernel whose features are to be returned.
++            num_outputs: The number of features produced by the module.
++            data_feature_map: Representation of the multitask kernel's
++                `data_covar_module` as a FeatureMap.
++            input_transform: An optional input transform for the module.
++                For kernels with `active_dims`, defaults to a FeatureSelector
++                instance that extracts the relevant input features.
++            output_transform: An optional output transform for the module.
++        """
++        if not isinstance(kernel, kernels.MultitaskKernel):
++            raise ValueError(
++                f"Expected {kernels.MultitaskKernel}, but {type(kernel)=}."
++            )
++
++        super().__init__(
++            kernel=kernel,
++            input_transform=input_transform,
++            output_transform=output_transform,
++            ignore_active_dims=ignore_active_dims,
++        )
++        self.data_feature_map = data_feature_map
++
++    def forward(self, x: Tensor) -> Union[KroneckerProductLinearOperator, Tensor]:
++        r"""Returns the Kronecker product of the square root task covariance matrix
++        and a feature-map-based representation of :code:`data_covar_module`.
++        """
++        data_features = self.data_feature_map(x)
++        task_features = self.kernel.task_covar_module.covar_matrix.cholesky()
++        task_features = task_features.expand(
++            *data_features.shape[: max(0, data_features.ndim - task_features.ndim)],
++            *task_features.shape,
++        )
++        return KroneckerProductLinearOperator(data_features, task_features)
++
++    @property
++    def num_tasks(self) -> int:
++        return self.kernel.num_tasks
++
++    @property
++    def raw_output_shape(self) -> Size:
++        size0, *sizes = self.data_feature_map.output_shape
++        return Size((self.num_tasks * size0, *sizes))
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/paths.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/paths.py
+--- a/fbcode/pytorch/botorch/botorch/sampling/pathwise/paths.py
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/paths.py
+@@ -7,41 +7,33 @@
+ from __future__ import annotations
+
+ from abc import ABC
+-from typing import (
+-    Any,
+-    Callable,
+-    Dict,
+-    Iterable,
+-    Iterator,
+-    List,
+-    Mapping,
+-    Optional,
+-    Tuple,
+-    Union,
+-)
++from string import ascii_letters
++from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Union
+
+ from botorch.exceptions.errors import UnsupportedError
+ from botorch.sampling.pathwise.features import FeatureMap
+ from botorch.sampling.pathwise.utils import (
++    ModuleDictMixin,
++    ModuleListMixin,
+     TInputTransform,
+     TOutputTransform,
+     TransformedModuleMixin,
+ )
+-from torch import Tensor
+-from torch.nn import Module, ModuleDict, ModuleList, Parameter
++from torch import einsum, Tensor
++from torch.nn import Module, Parameter
+
+
+ class SamplePath(ABC, TransformedModuleMixin, Module):
+     r"""Abstract base class for Botorch sample paths."""
+
+
+-class PathDict(SamplePath):
++class PathDict(SamplePath, ModuleDictMixin[SamplePath]):
+     r"""A dictionary of SamplePaths."""
+
+     def __init__(
+         self,
+         paths: Optional[Mapping[str, SamplePath]] = None,
+-        join: Optional[Callable[[List[Tensor]], Tensor]] = None,
++        reducer: Optional[Callable[[List[Tensor]], Tensor]] = None,
+         input_transform: Optional[TInputTransform] = None,
+         output_transform: Optional[TOutputTransform] = None,
+     ) -> None:
+@@ -49,59 +41,33 @@
+
+         Args:
+             paths: An optional mapping of strings to sample paths.
+-            join: An optional callable used to combine each path's outputs.
++            reducer: An optional callable used to combine each path's outputs.
+             input_transform: An optional input transform for the module.
+             output_transform: An optional output transform for the module.
+         """
+-        if join is None and output_transform is not None:
+-            raise UnsupportedError("Output transforms must be preceded by a join rule.")
+-
+-        super().__init__()
+-        self.join = join
++        if reducer is None and output_transform is not None:
++            raise UnsupportedError(
++                "`output_transform` must be preceded by a `reducer`."
++            )
++
++        SamplePath.__init__(self)
++        ModuleDictMixin.__init__(self, attr_name="paths", modules=paths)
++        self.reducer = reducer
+         self.input_transform = input_transform
+         self.output_transform = output_transform
+-        self.paths = (
+-            paths
+-            if isinstance(paths, ModuleDict)
+-            else ModuleDict({} if paths is None else paths)
+-        )
+
+     def forward(self, x: Tensor, **kwargs: Any) -> Union[Tensor, Dict[str, Tensor]]:
+-        out = [path(x, **kwargs) for path in self.paths.values()]
+-        return dict(zip(self.paths, out)) if self.join is None else self.join(out)
+-
+-    def items(self) -> Iterable[Tuple[str, SamplePath]]:
+-        return self.paths.items()
+-
+-    def keys(self) -> Iterable[str]:
+-        return self.paths.keys()
+-
+-    def values(self) -> Iterable[SamplePath]:
+-        return self.paths.values()
+-
+-    def __len__(self) -> int:
+-        return len(self.paths)
+-
+-    def __iter__(self) -> Iterator[SamplePath]:
+-        yield from self.paths
+-
+-    def __delitem__(self, key: str) -> None:
+-        del self.paths[key]
+-
+-    def __getitem__(self, key: str) -> SamplePath:
+-        return self.paths[key]
+-
+-    def __setitem__(self, key: str, val: SamplePath) -> None:
+-        self.paths[key] = val
+
+-
+-class PathList(SamplePath):
++class PathList(SamplePath, ModuleListMixin[SamplePath]):
+     r"""A list of SamplePaths."""
+
+     def __init__(
+         self,
+         paths: Optional[Iterable[SamplePath]] = None,
+-        join: Optional[Callable[[List[Tensor]], Tensor]] = None,
++        reducer: Optional[Callable[[List[Tensor]], Tensor]] = None,
+         input_transform: Optional[TInputTransform] = None,
+         output_transform: Optional[TOutputTransform] = None,
+     ) -> None:
+@@ -109,42 +75,24 @@
+
+         Args:
+             paths: An optional iterable of sample paths.
+-            join: An optional callable used to combine each path's outputs.
++            reducer: An optional callable used to combine each path's outputs.
+             input_transform: An optional input transform for the module.
+             output_transform: An optional output transform for the module.
+         """
+-
+-        if join is None and output_transform is not None:
+-            raise UnsupportedError("Output transforms must be preceded by a join rule.")
+-
+-        super().__init__()
+-        self.join = join
++        if reducer is None and output_transform is not None:
++            raise UnsupportedError(
++                "`output_transform` must be preceded by a `reducer`."
++            )
++
++        SamplePath.__init__(self)
++        ModuleListMixin.__init__(self, attr_name="paths", modules=paths)
++        self.reducer = reducer
+         self.input_transform = input_transform
+         self.output_transform = output_transform
+-        self.paths = (
+-            paths
+-            if isinstance(paths, ModuleList)
+-            else ModuleList({} if paths is None else paths)
+-        )
+
+     def forward(self, x: Tensor, **kwargs: Any) -> Union[Tensor, List[Tensor]]:
+-        out = [path(x, **kwargs) for path in self.paths]
+-        return out if self.join is None else self.join(out)
+-
+-    def __len__(self) -> int:
+-        return len(self.paths)
+-
+-    def __iter__(self) -> Iterator[SamplePath]:
+-        yield from self.paths
+-
+-    def __delitem__(self, key: int) -> None:
+-        del self.paths[key]
+-
+-    def __getitem__(self, key: int) -> SamplePath:
+-        return self.paths[key]
+-
+-    def __setitem__(self, key: int, val: SamplePath) -> None:
+-        self.paths[key] = val
++        outputs = [path(x, **kwargs) for path in self]
++        return outputs if self.reducer is None else self.reducer(outputs)
+
+
+ class GeneralizedLinearPath(SamplePath):
+@@ -180,6 +128,10 @@
+         self.output_transform = output_transform
+
+     def forward(self, x: Tensor, **kwargs) -> Tensor:
+-        feat = self.feature_map(x, **kwargs)
+-        out = (feat @ self.weight.unsqueeze(-1)).squeeze(-1)
+-        return out if self.bias_module is None else out + self.bias_module(x)
++        features = self.feature_map(x, **kwargs)
++        output = (features @ self.weight.unsqueeze(-1)).squeeze(-1)
++        ndim = len(self.feature_map.output_shape)
++        if ndim > 1:  # sum over the remaining feature dimensions
++            output = einsum(f"...{ascii_letters[:ndim - 1]}->...", output)
++
++        return output if self.bias_module is None else output + self.bias_module(x)
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/posterior_samplers.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/posterior_samplers.py
+--- a/fbcode/pytorch/botorch/botorch/sampling/pathwise/posterior_samplers.py
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/posterior_samplers.py
+@@ -17,7 +17,7 @@
+
+ from __future__ import annotations
+
+-from typing import Any, Optional, Union
++from typing import Any, Optional
+
+ from botorch.models.approximate_gp import ApproximateGPyTorchModel
+ from botorch.models.model_list_gp_regression import ModelListGP
+@@ -28,15 +28,19 @@
+ )
+ from botorch.sampling.pathwise.update_strategies import gaussian_update, TPathwiseUpdate
+ from botorch.sampling.pathwise.utils import (
++    append_transform,
++    get_input_transform,
+     get_output_transform,
+     get_train_inputs,
+     get_train_targets,
++    prepend_transform,
+     TInputTransform,
+     TOutputTransform,
+ )
+ from botorch.utils.context_managers import delattr_ctx
+ from botorch.utils.dispatcher import Dispatcher
+ from gpytorch.models import ApproximateGP, ExactGP, GP
++from gpytorch.variational import _VariationalStrategy
+ from torch import Size
+
+ DrawMatheronPaths = Dispatcher("draw_matheron_paths")
+@@ -76,7 +80,7 @@
+         """
+
+         super().__init__(
+-            join=sum,
++            reducer=sum,
+             paths={"prior_paths": prior_paths, "update_paths": update_paths},
+             input_transform=input_transform,
+             output_transform=output_transform,
+@@ -104,6 +108,7 @@
+             a set of sample paths representing the prior.
+         update_strategy: A callable that takes a model and a tensor of prior process
+             values and returns a set of sample paths representing the data.
++        **kwargs: Additional keyword arguments are passed to subroutines.
+     """
+
+     return DrawMatheronPaths(
+@@ -149,9 +154,41 @@
+     )
+
+
+-@DrawMatheronPaths.register((ApproximateGP, ApproximateGPyTorchModel))
++@DrawMatheronPaths.register(ApproximateGPyTorchModel)
++def _draw_matheron_paths_ApproximateGPyTorch(
++    model: ApproximateGPyTorchModel, **kwargs: Any
++) -> MatheronPath:
++    paths = draw_matheron_paths(model.model, **kwargs)
++    input_transform = get_input_transform(model)
++    if input_transform:
++        append_transform(
++            module=paths,
++            attr_name="input_transform",
++            transform=input_transform,
++        )
++
++    output_transform = get_output_transform(model)
++    if output_transform:
++        prepend_transform(
++            module=paths,
++            attr_name="output_transform",
++            transform=output_transform,
++        )
++
++    return paths
++
++
++@DrawMatheronPaths.register(ApproximateGP)
+ def _draw_matheron_paths_ApproximateGP(
+-    model: Union[ApproximateGP, ApproximateGPyTorchModel],
++    model: ApproximateGP, **kwargs: Any
++) -> MatheronPath:
++    return DrawMatheronPaths(model, model.variational_strategy, **kwargs)
++
++
++@DrawMatheronPaths.register(ApproximateGP, _VariationalStrategy)
++def _draw_matheron_paths_ApproximateGP_fallback(
++    model: ApproximateGP,
++    _: _VariationalStrategy,
+     *,
+     sample_shape: Size,
+     prior_sampler: TPathwisePriorSampler,
+@@ -159,21 +196,12 @@
+     **kwargs: Any,
+ ) -> MatheronPath:
+     # Note: Inducing points are assumed to be pre-transformed
+-    Z = (
+-        model.model.variational_strategy.inducing_points
+-        if isinstance(model, ApproximateGPyTorchModel)
+-        else model.variational_strategy.inducing_points
+-    )
+-    with delattr_ctx(model, "outcome_transform"):
+-        # Generate draws from the prior
+-        prior_paths = prior_sampler(model=model, sample_shape=sample_shape)
+-        sample_values = prior_paths.forward(Z)  # `forward` bypasses transforms
++    Z = model.variational_strategy.inducing_points
+
+-        # Compute pathwise updates
+-        update_paths = update_strategy(model=model, sample_values=sample_values)
++    # Generate draws from the prior
++    prior_paths = prior_sampler(model=model, sample_shape=sample_shape)
++    sample_values = prior_paths.forward(Z)  # `forward` bypasses transforms
+
+-    return MatheronPath(
+-        prior_paths=prior_paths,
+-        update_paths=update_paths,
+-        output_transform=get_output_transform(model),
+-    )
++    # Compute pathwise updates
++    update_paths = update_strategy(model=model, sample_values=sample_values)
++    return MatheronPath(prior_paths=prior_paths, update_paths=update_paths)
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/prior_samplers.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/prior_samplers.py
+--- a/fbcode/pytorch/botorch/botorch/sampling/pathwise/prior_samplers.py
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/prior_samplers.py
+@@ -6,11 +6,12 @@
+
+ from __future__ import annotations
+
++from copy import deepcopy
+ from typing import Any, Callable, List, Optional
+
+-from botorch.models.approximate_gp import ApproximateGPyTorchModel
+-from botorch.models.model_list_gp_regression import ModelListGP
+-from botorch.sampling.pathwise.features import gen_kernel_features
++import torch
++from botorch import models
++from botorch.sampling.pathwise.features import gen_kernel_feature_map
+ from botorch.sampling.pathwise.features.generators import TKernelFeatureMapGenerator
+ from botorch.sampling.pathwise.paths import GeneralizedLinearPath, PathList, SamplePath
+ from botorch.sampling.pathwise.utils import (
+@@ -45,41 +46,41 @@
+     Args:
+         model: The prior over functions.
+         sample_shape: The shape of the sample paths to be drawn.
++        **kwargs: Additional keyword arguments are passed to subroutines.
+     """
+     return DrawKernelFeaturePaths(model, sample_shape=sample_shape, **kwargs)
+
+
+ def _draw_kernel_feature_paths_fallback(
+-    num_inputs: int,
+     mean_module: Optional[Module],
+     covar_module: Kernel,
+     sample_shape: Size,
+-    num_features: int = 1024,
+-    map_generator: TKernelFeatureMapGenerator = gen_kernel_features,
++    map_generator: TKernelFeatureMapGenerator = gen_kernel_feature_map,
+     input_transform: Optional[TInputTransform] = None,
+     output_transform: Optional[TOutputTransform] = None,
+     weight_generator: Optional[Callable[[Size], Tensor]] = None,
++    **kwargs: Any,
+ ) -> GeneralizedLinearPath:
+-
+     # Generate a kernel feature map
+-    feature_map = map_generator(
+-        kernel=covar_module,
+-        num_inputs=num_inputs,
+-        num_outputs=num_features,
+-    )
++    feature_map = map_generator(kernel=covar_module, **kwargs)
+
+     # Sample random weights with which to combine kernel features
++    weight_shape = (
++        *sample_shape,
++        *covar_module.batch_shape,
++        *feature_map.output_shape,
++    )
+     if weight_generator is None:
+         weight = draw_sobol_normal_samples(
+             n=sample_shape.numel() * covar_module.batch_shape.numel(),
+-            d=feature_map.num_outputs,
++            d=feature_map.output_shape.numel(),
+             device=covar_module.device,
+             dtype=covar_module.dtype,
+-        ).reshape(sample_shape + covar_module.batch_shape + (feature_map.num_outputs,))
++        ).reshape(weight_shape)
+     else:
+-        weight = weight_generator(
+-            sample_shape + covar_module.batch_shape + (feature_map.num_outputs,)
+-        ).to(device=covar_module.device, dtype=covar_module.dtype)
++        weight = weight_generator(weight_shape).to(
++            device=covar_module.device, dtype=covar_module.dtype
++        )
+
+     # Return the sample paths
+     return GeneralizedLinearPath(
+@@ -97,35 +98,66 @@
+ ) -> GeneralizedLinearPath:
+     (train_X,) = get_train_inputs(model, transformed=False)
+     return _draw_kernel_feature_paths_fallback(
+-        num_inputs=train_X.shape[-1],
+         mean_module=model.mean_module,
+         covar_module=model.covar_module,
+         input_transform=get_input_transform(model),
+         output_transform=get_output_transform(model),
++        num_ambient_inputs=train_X.shape[-1],
+         **kwargs,
+     )
+
+
+-@DrawKernelFeaturePaths.register(ModelListGP)
+-def _draw_kernel_feature_paths_list(
+-    model: ModelListGP,
+-    join: Optional[Callable[[List[Tensor]], Tensor]] = None,
++@DrawKernelFeaturePaths.register(models.ModelListGP)
++def _draw_kernel_feature_paths_ModelListGP(
++    model: models.ModelListGP,
++    reducer: Optional[Callable[[List[Tensor]], Tensor]] = None,
+     **kwargs: Any,
+ ) -> PathList:
+     paths = [draw_kernel_feature_paths(m, **kwargs) for m in model.models]
+-    return PathList(paths=paths, join=join)
++    return PathList(paths=paths, reducer=reducer)
++
++
++@DrawKernelFeaturePaths.register(models.MultiTaskGP)
++def _draw_kernel_feature_paths_MultiTaskGP(
++    model: models.MultiTaskGP, **kwargs: Any
++) -> GeneralizedLinearPath:
++    (train_X,) = get_train_inputs(model, transformed=False)
++    num_ambient_inputs = train_X.shape[-1]
++    task_index = (
++        num_ambient_inputs + model._task_feature
++        if model._task_feature < 0
++        else model._task_feature
++    )
++
++    base_kernel = deepcopy(model.covar_module)
++    base_kernel.active_dims = torch.LongTensor(
++        [index for index in range(train_X.shape[-1]) if index != task_index],
++        device=base_kernel.device,
++    )
++
++    task_kernel = deepcopy(model.task_covar_module)
++    task_kernel.active_dims = torch.tensor([task_index], device=base_kernel.device)
++
++    return _draw_kernel_feature_paths_fallback(
++        mean_module=model.mean_module,
++        covar_module=base_kernel * task_kernel,
++        input_transform=get_input_transform(model),
++        output_transform=get_output_transform(model),
++        num_ambient_inputs=num_ambient_inputs,
++        **kwargs,
++    )
+
+
+-@DrawKernelFeaturePaths.register(ApproximateGPyTorchModel)
++@DrawKernelFeaturePaths.register(models.ApproximateGPyTorchModel)
+ def _draw_kernel_feature_paths_ApproximateGPyTorchModel(
+-    model: ApproximateGPyTorchModel, **kwargs: Any
++    model: models.ApproximateGPyTorchModel, **kwargs: Any
+ ) -> GeneralizedLinearPath:
+     (train_X,) = get_train_inputs(model, transformed=False)
+     return DrawKernelFeaturePaths(
+         model.model,
+-        num_inputs=train_X.shape[-1],
+         input_transform=get_input_transform(model),
+         output_transform=get_output_transform(model),
++        num_ambient_inputs=train_X.shape[-1],
+         **kwargs,
+     )
+
+@@ -139,14 +171,9 @@
+
+ @DrawKernelFeaturePaths.register(ApproximateGP, _VariationalStrategy)
+ def _draw_kernel_feature_paths_ApproximateGP_fallback(
+-    model: ApproximateGP,
+-    _: _VariationalStrategy,
+-    *,
+-    num_inputs: int,
+-    **kwargs: Any,
++    model: ApproximateGP, _: _VariationalStrategy, **kwargs: Any
+ ) -> GeneralizedLinearPath:
+     return _draw_kernel_feature_paths_fallback(
+-        num_inputs=num_inputs,
+         mean_module=model.mean_module,
+         covar_module=model.covar_module,
+         **kwargs,
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/update_strategies.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/update_strategies.py
+--- a/fbcode/pytorch/botorch/botorch/sampling/pathwise/update_strategies.py
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/update_strategies.py
+@@ -6,10 +6,13 @@
+
+ from __future__ import annotations
+
++from copy import deepcopy
++
+ from typing import Any, Callable, Optional, Union
+
+ import torch
+ from botorch.models.approximate_gp import ApproximateGPyTorchModel
++from botorch.models.multitask import MultiTaskGP
+ from botorch.models.transforms.input import InputTransform
+ from botorch.sampling.pathwise.features import KernelEvaluationMap
+ from botorch.sampling.pathwise.paths import GeneralizedLinearPath, SamplePath
+@@ -60,6 +63,7 @@
+         sample_values: Assumed values for :math:`f(X)`.
+         likelihood: An optional likelihood used to help define the desired
+             update. Defaults to `model.likelihood` if it exists else None.
++        **kwargs: Additional keyword arguments are passed to subroutines.
+     """
+     if likelihood is DEFAULT:
+         likelihood = getattr(model, "likelihood", None)
+@@ -89,7 +93,7 @@
+             else scale_tril
+         )
+
+-    # Solve for `Cov(y, y)^{-1}(Y - f(X) - ε)`
++    # Solve for `Cov(y, y)^{-1}(y - f(X) - ε)`
+     errors = target_values - sample_values
+     weight = torch.cholesky_solve(errors.unsqueeze(-1), scale_tril.to_dense())
+
+@@ -134,6 +138,48 @@
+     )
+
+
++@GaussianUpdate.register(MultiTaskGP, _GaussianLikelihoodBase)
++def _draw_kernel_feature_paths_MultiTaskGP(
++    model: MultiTaskGP,
++    likelihood: _GaussianLikelihoodBase,
++    *,
++    sample_values: Tensor,
++    target_values: Optional[Tensor] = None,
++    points: Optional[Tensor] = None,
++    noise_covariance: Optional[Union[Tensor, LinearOperator]] = None,
++    **ignore: Any,
++) -> GeneralizedLinearPath:
++    if points is None:
++        (points,) = get_train_inputs(model, transformed=True)
++
++    if target_values is None:
++        target_values = get_train_targets(model, transformed=True)
++
++    if noise_covariance is None:
++        noise_covariance = likelihood.noise_covar(shape=points.shape[:-1])
++
++    # Prepare product kernel
++    num_inputs = points.shape[-1]
++    task_index = model._task_feature
++    base_kernel = deepcopy(model.covar_module)
++    base_kernel.active_dims = torch.LongTensor(
++        [index for index in range(num_inputs) if index != task_index],
++        device=base_kernel.device,
++    )
++    task_kernel = deepcopy(model.task_covar_module)
++    task_kernel.active_dims = torch.LongTensor([task_index], device=base_kernel.device)
++
++    # Return exact update using product kernel
++    return _gaussian_update_exact(
++        kernel=base_kernel * task_kernel,
++        points=points,
++        target_values=target_values,
++        sample_values=sample_values,
++        noise_covariance=noise_covariance,
++        input_transform=get_input_transform(model),
++    )
++
++
+ @GaussianUpdate.register(ApproximateGPyTorchModel, (Likelihood, NoneType))
+ def _gaussian_update_ApproximateGPyTorchModel(
+     model: ApproximateGPyTorchModel,
+@@ -155,7 @@
+ @GaussianUpdate.register(ApproximateGP, VariationalStrategy)
+ def _gaussian_update_ApproximateGP_VariationalStrategy(
+     model: ApproximateGP,
+-    _: VariationalStrategy,
++    variational_strategy: VariationalStrategy,
+     *,
+     sample_values: Tensor,
+     target_values: Optional[Tensor] = None,
+@@ -171,18 +217,20 @@
+
+     # Inducing points `Z` are assumed to live in transformed space
+     batch_shape = model.covar_module.batch_shape
+-    v = model.variational_strategy
+-    Z = v.inducing_points
+-    L = v._cholesky_factor(v(Z, prior=True).lazy_covariance_matrix).to(
+-        dtype=sample_values.dtype
+-    )
++    Z = variational_strategy.inducing_points
++    L = variational_strategy._cholesky_factor(
++        variational_strategy(Z, prior=True).lazy_covariance_matrix
++    ).to(dtype=sample_values.dtype)
+
+     # Generate whitened inducing variables `u`, then location-scale transform
+     if target_values is None:
+-        u = v.variational_distribution.rsample(
++        base_values = variational_strategy.variational_distribution.rsample(
+             sample_values.shape[: sample_values.ndim - len(batch_shape) - 1],
+         )
+-        target_values = model.mean_module(Z) + (u @ L.transpose(-1, -2))
++        # target_values = model.mean_module(Z) + (u @ L.transpose(-1, -2))
++        target_values = model.mean_module(Z) + (L @ base_values.unsqueeze(-1)).squeeze(
++            -1
++        )
+
+     return _gaussian_update_exact(
+         kernel=model.covar_module,
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/__init__.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/__init__.py
+new file mode 100644
+--- /dev/null
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/__init__.py
+@@ -0,0 +1,47 @@
++#!/usr/bin/env python3
++# Copyright (c) Meta Platforms, Inc. and affiliates.
++#
++# This source code is licensed under the MIT license found in the
++# LICENSE file in the root directory of this source tree.
++
++
++from botorch.sampling.pathwise.utils.helpers import (
++    append_transform,
++    get_input_transform,
++    get_kernel_num_inputs,
++    get_output_transform,
++    get_train_inputs,
++    get_train_targets,
++    is_finite_dimensional,
++    kernel_instancecheck,
++    prepend_transform,
++    sparse_block_diag,
++    untransform_shape,
++)
++from botorch.sampling.pathwise.utils.mixins import (
++    ModuleDictMixin,
++    ModuleListMixin,
++    TInputTransform,
++    TOutputTransform,
++    TransformedModuleMixin,
++)
++
++
++__all__ = [
++    "append_transform",
++    "get_input_transform",
++    "get_output_transform",
++    "get_kernel_num_inputs",
++    "get_train_inputs",
++    "get_train_targets",
++    "is_finite_dimensional",
++    "kernel_instancecheck",
++    "prepend_transform",
++    "sparse_block_diag",
++    "untransform_shape",
++    "ModuleDictMixin",
++    "ModuleListMixin",
++    "TransformedModuleMixin",
++    "TInputTransform",
++    "TOutputTransform",
++]
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/helpers.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/helpers.py
+new file mode 100644
+--- /dev/null
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/helpers.py
+@@ -0,0 +1,284 @@
++#!/usr/bin/env python3
++# Copyright (c) Meta Platforms, Inc. and affiliates.
++#
++# This source code is licensed under the MIT license found in the
++# LICENSE file in the root directory of this source tree.
++
++from __future__ import annotations
++
++from sys import maxsize
++from typing import (
++    Callable,
++    Iterable,
++    Iterator,
++    List,
++    Optional,
++    overload,
++    Tuple,
++    Type,
++    TypeVar,
++    Union,
++)
++
++import torch
++from botorch.models.approximate_gp import SingleTaskVariationalGP
++from botorch.models.gpytorch import GPyTorchModel
++from botorch.models.model import Model, ModelList
++from botorch.models.transforms.input import InputTransform
++from botorch.models.transforms.outcome import OutcomeTransform
++from botorch.sampling.pathwise.utils.mixins import TransformedModuleMixin
++from botorch.sampling.pathwise.utils.transforms import (
++    ChainedTransform,
++    OutcomeUntransformer,
++    TensorTransform,
++)
++from botorch.utils.dispatcher import Dispatcher
++from botorch.utils.types import MISSING
++from gpytorch import kernels
++from gpytorch.kernels.kernel import Kernel
++from linear_operator import LinearOperator
++from torch import Size, Tensor
++
++TKernel = TypeVar("TKernel", bound=Kernel)
++GetTrainInputs = Dispatcher("get_train_inputs")
++GetTrainTargets = Dispatcher("get_train_targets")
++INF_DIM_KERNELS: Tuple[Type[Kernel]] = (kernels.MaternKernel, kernels.RBFKernel)
++
++
++def kernel_instancecheck(
++    kernel: Kernel,
++    types: Union[TKernel, Tuple[TKernel, ...]],
++    reducer: Callable[[Iterator[bool]], bool] = any,
++    max_depth: int = maxsize,
++) -> bool:
++    if isinstance(kernel, types):
++        return True
++
++    if max_depth == 0 or not isinstance(kernel, Kernel):
++        return False
++
++    return reducer(
++        kernel_instancecheck(module, types, reducer, max_depth - 1)
++        for module in kernel.modules()
++        if module is not kernel and isinstance(module, Kernel)
++    )
++
++
++def is_finite_dimensional(kernel: Kernel, max_depth: int = maxsize) -> bool:
++    return not kernel_instancecheck(
++        kernel, types=INF_DIM_KERNELS, reducer=any, max_depth=max_depth
++    )
++
++
++def sparse_block_diag(
++    blocks: Iterable[Tensor],
++    base_ndim: int = 2,
++) -> Tensor:
++    device = next(iter(blocks)).device
++    values = []
++    indices = []
++    shape = torch.zeros(base_ndim, 1, dtype=torch.long, device=device)
++    batch_shapes = []
++    for blk in blocks:
++        batch_shapes.append(blk.shape[:-base_ndim])
++        if isinstance(blk, LinearOperator):
++            blk = blk.to_dense()
++
++        _blk = (blk if blk.is_sparse else blk.to_sparse()).coalesce()
++        values.append(_blk.values())
++
++        idx = _blk.indices()
++        idx[-base_ndim:, :] += shape
++        indices.append(idx)
++        for i, size in enumerate(blk.shape[-base_ndim:]):
++            shape[i] += size
++
++    return torch.sparse_coo_tensor(
++        indices=torch.concat(indices, dim=-1),
++        values=torch.concat(values),
++        size=Size((*torch.broadcast_shapes(*batch_shapes), *shape.squeeze(-1))),
++    )
++
++
++def untransform_shape(
++    transform: Union[TensorTransform, InputTransform, OutcomeTransform],
++    shape: Size,
++    device: Optional[torch.device] = None,
++    dtype: Optional[torch.dtype] = None,
++) -> Size:
++    if transform is None:
++        return shape
++
++    test_case = torch.empty(shape, device=device, dtype=dtype)
++    if isinstance(transform, OutcomeTransform):
++        result, _ = transform.untransform(test_case)
++    elif isinstance(transform, InputTransform):
++        result = transform.untransform(test_case)
++    else:
++        result = transform(test_case)
++
++    # TODO: This function assumes that dimensionality remains unchanged
++    return result.shape[-test_case.ndim :]
++
++
++def append_transform(
++    module: TransformedModuleMixin,
++    attr_name: str,
++    transform: Union[InputTransform, OutcomeTransform, TensorTransform],
++) -> None:
++    other = getattr(module, attr_name, None)
++    if other is None:
++        setattr(module, attr_name, transform)
++    else:
++        setattr(module, attr_name, ChainedTransform(other, transform))
++
++
++def prepend_transform(
++    module: TransformedModuleMixin,
++    attr_name: str,
++    transform: Union[InputTransform, OutcomeTransform, TensorTransform],
++) -> None:
++    other = getattr(module, attr_name, None)
++    if other is None:
++        setattr(module, attr_name, transform)
++    else:
++        setattr(module, attr_name, ChainedTransform(transform, other))
++
++
++def get_input_transform(model: GPyTorchModel) -> Optional[InputTransform]:
++    r"""Returns a model's input_transform or None."""
++    return getattr(model, "input_transform", None)
++
++
++def get_output_transform(model: GPyTorchModel) -> Optional[OutcomeUntransformer]:
++    r"""Returns a wrapped version of a model's outcome_transform or None."""
++    transform = getattr(model, "outcome_transform", None)
++    if transform is None:
++        return None
++
++    return OutcomeUntransformer(transform=transform, num_outputs=model.num_outputs)
++
++
++def get_kernel_num_inputs(
++    kernel: Kernel,
++    num_ambient_inputs: Optional[int] = None,
++    default: Optional[Optional[int]] = MISSING,
++) -> Optional[int]:
++    if kernel.active_dims is not None:
++        return len(kernel.active_dims)
++
++    if kernel.ard_num_dims is not None:
++        return kernel.ard_num_dims
++
++    if num_ambient_inputs is None:
++        if default is MISSING:
++            raise ValueError(
++                "`num_ambient_inputs` must be passed when `kernel.active_dims` and "
++                "`kernel.ard_num_dims` are both None and no `default` has been defined."
++            )
++        return default
++    return num_ambient_inputs
++
++
++@overload
++def get_train_inputs(model: Model, transformed: bool = False) -> Tuple[Tensor, ...]:
++    pass  # pragma: no cover
++
++
++@overload
++def get_train_inputs(model: ModelList, transformed: bool = False) -> List[...]:
++    pass  # pragma: no cover
++
++
++def get_train_inputs(model: Model, transformed: bool = False):
++    return GetTrainInputs(model, transformed=transformed)
++
++
++@GetTrainInputs.register(Model)
++def _get_train_inputs_Model(model: Model, transformed: bool = False) -> Tuple[Tensor]:
++    if not transformed:
++        original_train_input = getattr(model, "_original_train_inputs", None)
++        if torch.is_tensor(original_train_input):
++            return (original_train_input,)
++
++    (X,) = model.train_inputs
++    transform = get_input_transform(model)
++    if transform is None:
++        return (X,)
++
++    if model.training:
++        return (transform.forward(X) if transformed else X,)
++    return (X if transformed else transform.untransform(X),)
++
++
++@GetTrainInputs.register(SingleTaskVariationalGP)
++def _get_train_inputs_SingleTaskVariationalGP(
++    model: SingleTaskVariationalGP, transformed: bool = False
++) -> Tuple[Tensor]:
++    (X,) = model.model.train_inputs
++    if model.training != transformed:
++        return (X,)
++
++    transform = get_input_transform(model)
++    if transform is None:
++        return (X,)
++
++    return (transform.forward(X) if model.training else transform.untransform(X),)
++
++
++@GetTrainInputs.register(ModelList)
++def _get_train_inputs_ModelList(
++    model: ModelList, transformed: bool = False
++) -> List[...]:
++    return [get_train_inputs(m, transformed=transformed) for m in model.models]
++
++
++@overload
++def get_train_targets(model: Model, transformed: bool = False) -> Tensor:
++    pass  # pragma: no cover
++
++
++@overload
++def get_train_targets(model: ModelList, transformed: bool = False) -> List[...]:
++    pass  # pragma: no cover
++
++
++def get_train_targets(model: Model, transformed: bool = False):
++    return GetTrainTargets(model, transformed=transformed)
++
++
++@GetTrainTargets.register(Model)
++def _get_train_targets_Model(model: Model, transformed: bool = False) -> Tensor:
++    Y = model.train_targets
++
++    # Note: Avoid using `get_output_transform` here since it creates a Module
++    transform = getattr(model, "outcome_transform", None)
++    if transformed or transform is None:
++        return Y
++
++    if model.num_outputs == 1:
++        return transform.untransform(Y.unsqueeze(-1))[0].squeeze(-1)
++    return transform.untransform(Y.transpose(-2, -1))[0].transpose(-2, -1)
++
++
++@GetTrainTargets.register(SingleTaskVariationalGP)
++def _get_train_targets_SingleTaskVariationalGP(
++    model: Model, transformed: bool = False
++) -> Tensor:
++    Y = model.model.train_targets
++    transform = getattr(model, "outcome_transform", None)
++    if transformed or transform is None:
++        return Y
++
++    if model.num_outputs == 1:
++        return transform.untransform(Y.unsqueeze(-1))[0].squeeze(-1)
++
++    # SingleTaskVariationalGP.__init__ doesn't bring the multitoutpout dimension inside
++    return transform.untransform(Y)[0]
++
++
++@GetTrainTargets.register(ModelList)
++def _get_train_targets_ModelList(
++    model: ModelList, transformed: bool = False
++) -> List[...]:
++    return [get_train_targets(m, transformed=transformed) for m in model.models]
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/mixins.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/mixins.py
+new file mode 100644
+--- /dev/null
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/mixins.py
+@@ -0,0 +1,120 @@
++#!/usr/bin/env python3
++# Copyright (c) Meta Platforms, Inc. and affiliates.
++#
++# This source code is licensed under the MIT license found in the
++# LICENSE file in the root directory of this source tree.
++
++from __future__ import annotations
++
++from abc import ABC
++from typing import (
++    Any,
++    Callable,
++    Generic,
++    Iterable,
++    Iterator,
++    Mapping,
++    Optional,
++    Tuple,
++    TypeVar,
++    Union,
++)
++
++from botorch.models.transforms.input import InputTransform
++from botorch.models.transforms.outcome import OutcomeTransform
++from botorch.utils.types import cast
++from torch import Tensor
++from torch.nn import Module, ModuleDict, ModuleList
++
++T = TypeVar("T")
++TModule = TypeVar("TModule", bound=Module)
++TInputTransform = Union[InputTransform, Callable[[Tensor], Tensor]]
++TOutputTransform = Union[OutcomeTransform, Callable[[Tensor], Tensor]]
++
++
++class TransformedModuleMixin:
++    r"""Mixin that wraps a module's __call__ method with optional transforms."""
++    input_transform: Optional[TInputTransform]
++    output_transform: Optional[TOutputTransform]
++
++    def __call__(self, values: Tensor, *args: Any, **kwargs: Any) -> Tensor:
++        input_transform = getattr(self, "input_transform", None)
++        if input_transform is not None:
++            values = (
++                input_transform.forward(values)
++                if isinstance(input_transform, InputTransform)
++                else input_transform(values)
++            )
++
++        output = super().__call__(values, *args, **kwargs)
++        output_transform = getattr(self, "output_transform", None)
++        if output_transform is None:
++            return output
++
++        return (
++            output_transform.untransform(output)[0]
++            if isinstance(output_transform, OutcomeTransform)
++            else output_transform(output)
++        )
++
++
++class ModuleDictMixin(ABC, Generic[TModule]):
++    def __init__(self, attr_name: str, modules: Optional[Mapping[str, TModule]] = None):
++        self.__module_dict_name = attr_name
++        self.register_module(self.__module_dict_name, cast(ModuleDict, modules))
++
++    @property
++    def __module_dict(self) -> ModuleDict:
++        return getattr(self, self.__module_dict_name)
++
++    def items(self) -> Iterable[Tuple[str, TModule]]:
++        return self.__module_dict.items()
++
++    def keys(self) -> Iterable[str]:
++        return self.__module_dict.keys()
++
++    def values(self) -> Iterable[TModule]:
++        return self.__module_dict.values()
++
++    def update(self, modules: Mapping[str, TModule]) -> None:
++        self.__module_dict.update(modules)
++
++    def __len__(self) -> int:
++        return len(self.__module_dict)
++
++    def __iter__(self) -> Iterator[str]:
++        yield from self.__module_dict
++
++    def __delitem__(self, key: str) -> None:
++        del self.__module_dict[key]
++
++    def __getitem__(self, key: str) -> TModule:
++        return self.__module_dict[key]
++
++    def __setitem__(self, key: str, val: TModule) -> None:
++        self.__module_dict[key] = val
++
++
++class ModuleListMixin(ABC, Generic[TModule]):
++    def __init__(self, attr_name: str, modules: Optional[Iterable[TModule]] = None):
++        self.__module_list_name = attr_name
++        self.register_module(self.__module_list_name, cast(ModuleList, modules))
++
++    @property
++    def __module_list(self) -> ModuleList:
++        return getattr(self, self.__module_list_name)
++
++    def __len__(self) -> int:
++        return len(self.__module_list)
++
++    def __iter__(self) -> Iterator[TModule]:
++        yield from self.__module_list
++
++    def __delitem__(self, key: int) -> None:
++        del self.__module_list[key]
++
++    def __getitem__(self, key: int) -> TModule:
++        return self.__module_list[key]
++
++    def __setitem__(self, key: int, val: TModule) -> None:
++        self.__module_list[key] = val
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/transforms.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/transforms.py
+new file mode 100644
+--- /dev/null
++++ b/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils/transforms.py
+@@ -0,0 +1,168 @@
++#!/usr/bin/env python3
++# Copyright (c) Meta Platforms, Inc. and affiliates.
++#
++# This source code is licensed under the MIT license found in the
++# LICENSE file in the root directory of this source tree.
++
++from __future__ import annotations
++
++from abc import ABC, abstractmethod
++from typing import Any, Iterable, Union
++
++import torch
++from botorch.models.transforms.outcome import OutcomeTransform
++from gpytorch.kernels import ScaleKernel
++from gpytorch.kernels.kernel import Kernel
++from torch import LongTensor, Tensor
++from torch.nn import Module, ModuleList
++
++
++class TensorTransform(ABC, Module):
++    r"""Abstract base class for transforms that map tensor to tensor."""
++
++    @abstractmethod
++    def forward(self, values: Tensor, **kwargs: Any) -> Tensor:
++        pass  # pragma: no cover
++
++
++class ChainedTransform(TensorTransform):
++    r"""A composition of TensorTransforms."""
++
++    def __init__(self, *transforms: TensorTransform):
++        r"""Initializes a ChainedTransform instance.
++
++        Args:
++            transforms: A set of transforms to be applied from right to left.
++        """
++        super().__init__()
++        self.transforms = ModuleList(transforms)
++
++    def forward(self, values: Tensor) -> Tensor:
++        for transform in reversed(self.transforms):
++            values = transform(values)
++        return values
++
++
++class ConstantMulTransform(TensorTransform):
++    r"""A transform that multiplies by a constant."""
++
++    def __init__(self, constant: Tensor):
++        r"""Initializes a ConstantMulTransform instance.
++
++        Args:
++            scale: Multiplicative constant.
++        """
++        super().__init__()
++        self.register_buffer("constant", torch.as_tensor(constant))
++
++    def forward(self, values: Tensor) -> Tensor:
++        return self.constant * values
++
++
++class CosineTransform(TensorTransform):
++    r"""A transform that returns cosine features."""
++
++    def forward(self, values: Tensor) -> Tensor:
++        return values.cos()
++
++
++class SineCosineTransform(TensorTransform):
++    r"""A transform that returns concatenated sine and cosine features."""
++
++    def forward(self, values: Tensor) -> Tensor:
++        return torch.concat([values.sin(), values.cos()], dim=-1)
++
++
++class InverseLengthscaleTransform(TensorTransform):
++    r"""A transform that divides its inputs by a kernels lengthscales."""
++
++    def __init__(self, kernel: Kernel):
++        r"""Initializes an InverseLengthscaleTransform instance.
++
++        Args:
++            kernel: The kernel whose lengthscales are to be used.
++        """
++        if not kernel.has_lengthscale:
++            raise RuntimeError(f"{type(kernel)} does not implement `lengthscale`.")
++
++        super().__init__()
++        self.kernel = kernel
++
++    def forward(self, values: Tensor) -> Tensor:
++        return self.kernel.lengthscale.reciprocal() * values
++
++
++class OutputscaleTransform(TensorTransform):
++    r"""A transform that multiplies its inputs by the square root of a
++    kernel's outputscale."""
++
++    def __init__(self, kernel: ScaleKernel):
++        r"""Initializes an OutputscaleTransform instance.
++
++        Args:
++            kernel: A ScaleKernel whose `outputscale` is to be used.
++        """
++        super().__init__()
++        self.kernel = kernel
++
++    def forward(self, values: Tensor) -> Tensor:
++        outputscale = (
++            self.kernel.outputscale[..., None, None]
++            if self.kernel.batch_shape
++            else self.kernel.outputscale
++        )
++        return outputscale.sqrt() * values
++
++
++class FeatureSelector(TensorTransform):
++    r"""A transform that returns a subset of its input's features.
++    along a given tensor dimension."""
++
++    def __init__(self, indices: Iterable[int], dim: Union[int, LongTensor] = -1):
++        r"""Initializes a FeatureSelector instance.
++
++        Args:
++            indices: A LongTensor of feature indices.
++            dim: The dimensional along which to index features.
++        """
++        super().__init__()
++        self.register_buffer("dim", dim if torch.is_tensor(dim) else torch.tensor(dim))
++        self.register_buffer(
++            "indices", indices if torch.is_tensor(indices) else torch.tensor(indices)
++        )
++
++    def forward(self, values: Tensor) -> Tensor:
++        return values.index_select(dim=self.dim, index=self.indices)
++
++
++class OutcomeUntransformer(TensorTransform):
++    r"""Module acting as a bridge for `OutcomeTransform.untransform`."""
++
++    def __init__(
++        self,
++        transform: OutcomeTransform,
++        num_outputs: Union[int, LongTensor],
++    ):
++        r"""Initializes an OutcomeUntransformer instance.
++
++        Args:
++            transform: The wrapped OutcomeTransform instance.
++            num_outputs: The number of outcome features that the
++                OutcomeTransform transforms.
++        """
++        super().__init__()
++        self.transform = transform
++        self.register_buffer(
++            "num_outputs",
++            num_outputs if torch.is_tensor(num_outputs) else torch.tensor(num_outputs),
++        )
++
++    def forward(self, values: Tensor) -> Tensor:
++        # OutcomeTransforms expect an explicit output dimension in the final position.
++        if self.num_outputs == 1:  # BoTorch has suppressed the output dimension
++            output_values, _ = self.transform.untransform(values.unsqueeze(-1))
++            return output_values.squeeze(-1)
++
++        # BoTorch has moved the output dimension inside as the final batch dimension.
++        output_values, _ = self.transform.untransform(values.transpose(-2, -1))
++        return output_values.transpose(-2, -1)
+diff --git a/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils.py b/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils.py
+deleted file mode 100644
+--- a/fbcode/pytorch/botorch/botorch/sampling/pathwise/utils.py
++++ /dev/null
+@@ -1,309 +0,0 @@
+-#!/usr/bin/env python3
+-# Copyright (c) Meta Platforms, Inc. and affiliates.
+-#
+-# This source code is licensed under the MIT license found in the
+-# LICENSE file in the root directory of this source tree.
+-
+-from __future__ import annotations
+-
+-from abc import ABC, abstractmethod
+-from typing import Any, Callable, Iterable, List, Optional, overload, Tuple, Union
+-
+-import torch
+-from botorch.models.approximate_gp import SingleTaskVariationalGP
+-from botorch.models.gpytorch import GPyTorchModel
+-from botorch.models.model import Model, ModelList
+-from botorch.models.transforms.input import InputTransform
+-from botorch.models.transforms.outcome import OutcomeTransform
+-from botorch.utils.dispatcher import Dispatcher
+-from gpytorch.kernels import ScaleKernel
+-from gpytorch.kernels.kernel import Kernel
+-from torch import LongTensor, Tensor
+-from torch.nn import Module, ModuleList
+-
+-TInputTransform = Union[InputTransform, Callable[[Tensor], Tensor]]
+-TOutputTransform = Union[OutcomeTransform, Callable[[Tensor], Tensor]]
+-GetTrainInputs = Dispatcher("get_train_inputs")
+-GetTrainTargets = Dispatcher("get_train_targets")
+-
+-
+-class TransformedModuleMixin:
+-    r"""Mixin that wraps a module's __call__ method with optional transforms."""
+-    input_transform: Optional[TInputTransform]
+-    output_transform: Optional[TOutputTransform]
+-
+-    def __call__(self, values: Tensor, *args: Any, **kwargs: Any) -> Tensor:
+-        input_transform = getattr(self, "input_transform", None)
+-        if input_transform is not None:
+-            values = (
+-                input_transform.forward(values)
+-                if isinstance(input_transform, InputTransform)
+-                else input_transform(values)
+-            )
+-
+-        output = super().__call__(values, *args, **kwargs)
+-        output_transform = getattr(self, "output_transform", None)
+-        if output_transform is None:
+-            return output
+-
+-        return (
+-            output_transform.untransform(output)[0]
+-            if isinstance(output_transform, OutcomeTransform)
+-            else output_transform(output)
+-        )
+-
+-
+-class TensorTransform(ABC, Module):
+-    r"""Abstract base class for transforms that map tensor to tensor."""
+-
+-    @abstractmethod
+-    def forward(self, values: Tensor, **kwargs: Any) -> Tensor:
+-        pass  # pragma: no cover
+-
+-
+-class ChainedTransform(TensorTransform):
+-    r"""A composition of TensorTransforms."""
+-
+-    def __init__(self, *transforms: TensorTransform):
+-        r"""Initializes a ChainedTransform instance.
+-
+-        Args:
+-            transforms: A set of transforms to be applied from right to left.
+-        """
+-        super().__init__()
+-        self.transforms = ModuleList(transforms)
+-
+-    def forward(self, values: Tensor) -> Tensor:
+-        for transform in reversed(self.transforms):
+-            values = transform(values)
+-        return values
+-
+-
+-class SineCosineTransform(TensorTransform):
+-    r"""A transform that returns concatenated sine and cosine features."""
+-
+-    def __init__(self, scale: Optional[Tensor] = None):
+-        r"""Initializes a SineCosineTransform instance.
+-
+-        Args:
+-            scale: An optional tensor used to rescale the module's outputs.
+-        """
+-        super().__init__()
+-        self.scale = scale
+-
+-    def forward(self, values: Tensor) -> Tensor:
+-        sincos = torch.concat([values.sin(), values.cos()], dim=-1)
+-        return sincos if self.scale is None else self.scale * sincos
+-
+-
+-class InverseLengthscaleTransform(TensorTransform):
+-    r"""A transform that divides its inputs by a kernels lengthscales."""
+-
+-    def __init__(self, kernel: Kernel):
+-        r"""Initializes an InverseLengthscaleTransform instance.
+-
+-        Args:
+-            kernel: The kernel whose lengthscales are to be used.
+-        """
+-        if not kernel.has_lengthscale:
+-            raise RuntimeError(f"{type(kernel)} does not implement `lengthscale`.")
+-
+-        super().__init__()
+-        self.kernel = kernel
+-
+-    def forward(self, values: Tensor) -> Tensor:
+-        return self.kernel.lengthscale.reciprocal() * values
+-
+-
+-class OutputscaleTransform(TensorTransform):
+-    r"""A transform that multiplies its inputs by the square root of a
+-    kernel's outputscale."""
+-
+-    def __init__(self, kernel: ScaleKernel):
+-        r"""Initializes an OutputscaleTransform instance.
+-
+-        Args:
+-            kernel: A ScaleKernel whose `outputscale` is to be used.
+-        """
+-        super().__init__()
+-        self.kernel = kernel
+-
+-    def forward(self, values: Tensor) -> Tensor:
+-        outputscale = (
+-            self.kernel.outputscale[..., None, None]
+-            if self.kernel.batch_shape
+-            else self.kernel.outputscale
+-        )
+-        return outputscale.sqrt() * values
+-
+-
+-class FeatureSelector(TensorTransform):
+-    r"""A transform that returns a subset of its input's features.
+-    along a given tensor dimension."""
+-
+-    def __init__(self, indices: Iterable[int], dim: Union[int, LongTensor] = -1):
+-        r"""Initializes a FeatureSelector instance.
+-
+-        Args:
+-            indices: A LongTensor of feature indices.
+-            dim: The dimensional along which to index features.
+-        """
+-        super().__init__()
+-        self.register_buffer("dim", dim if torch.is_tensor(dim) else torch.tensor(dim))
+-        self.register_buffer(
+-            "indices", indices if torch.is_tensor(indices) else torch.tensor(indices)
+-        )
+-
+-    def forward(self, values: Tensor) -> Tensor:
+-        return values.index_select(dim=self.dim, index=self.indices)
+-
+-
+-class OutcomeUntransformer(TensorTransform):
+-    r"""Module acting as a bridge for `OutcomeTransform.untransform`."""
+-
+-    def __init__(
+-        self,
+-        transform: OutcomeTransform,
+-        num_outputs: Union[int, LongTensor],
+-    ):
+-        r"""Initializes an OutcomeUntransformer instance.
+-
+-        Args:
+-            transform: The wrapped OutcomeTransform instance.
+-            num_outputs: The number of outcome features that the
+-                OutcomeTransform transforms.
+-        """
+-        super().__init__()
+-        self.transform = transform
+-        self.register_buffer(
+-            "num_outputs",
+-            num_outputs if torch.is_tensor(num_outputs) else torch.tensor(num_outputs),
+-        )
+-
+-    def forward(self, values: Tensor) -> Tensor:
+-        # OutcomeTransforms expect an explicit output dimension in the final position.
+-        if self.num_outputs == 1:  # BoTorch has suppressed the output dimension
+-            output_values, _ = self.transform.untransform(values.unsqueeze(-1))
+-            return output_values.squeeze(-1)
+-
+-        # BoTorch has moved the output dimension inside as the final batch dimension.
+-        output_values, _ = self.transform.untransform(values.transpose(-2, -1))
+-        return output_values.transpose(-2, -1)
+-
+-
+-def get_input_transform(model: GPyTorchModel) -> Optional[InputTransform]:
+-    r"""Returns a model's input_transform or None."""
+-    return getattr(model, "input_transform", None)
+-
+-
+-def get_output_transform(model: GPyTorchModel) -> Optional[OutcomeUntransformer]:
+-    r"""Returns a wrapped version of a model's outcome_transform or None."""
+-    transform = getattr(model, "outcome_transform", None)
+-    if transform is None:
+-        return None
+-
+-    return OutcomeUntransformer(transform=transform, num_outputs=model.num_outputs)
+-
+-
+-@overload
+-def get_train_inputs(model: Model, transformed: bool = False) -> Tuple[Tensor, ...]:
+-    pass  # pragma: no cover
+-
+-
+-@overload
+-def get_train_inputs(model: ModelList, transformed: bool = False) -> List[...]:
+-    pass  # pragma: no cover
+-
+-
+-def get_train_inputs(model: Model, transformed: bool = False):
+-    return GetTrainInputs(model, transformed=transformed)
+-
+-
+-@GetTrainInputs.register(Model)
+-def _get_train_inputs_Model(model: Model, transformed: bool = False) -> Tuple[Tensor]:
+-    if not transformed:
+-        original_train_input = getattr(model, "_original_train_inputs", None)
+-        if torch.is_tensor(original_train_input):
+-            return (original_train_input,)
+-
+-    (X,) = model.train_inputs
+-    transform = get_input_transform(model)
+-    if transform is None:
+-        return (X,)
+-
+-    if model.training:
+-        return (transform.forward(X) if transformed else X,)
+-    return (X if transformed else transform.untransform(X),)
+-
+-
+-@GetTrainInputs.register(SingleTaskVariationalGP)
+-def _get_train_inputs_SingleTaskVariationalGP(
+-    model: SingleTaskVariationalGP, transformed: bool = False
+-) -> Tuple[Tensor]:
+-    (X,) = model.model.train_inputs
+-    if model.training != transformed:
+-        return (X,)
+-
+-    transform = get_input_transform(model)
+-    if transform is None:
+-        return (X,)
+-
+-    return (transform.forward(X) if model.training else transform.untransform(X),)
+-
+-
+-@GetTrainInputs.register(ModelList)
+-def _get_train_inputs_ModelList(
+-    model: ModelList, transformed: bool = False
+-) -> List[...]:
+-    return [get_train_inputs(m, transformed=transformed) for m in model.models]
+-
+-
+-@overload
+-def get_train_targets(model: Model, transformed: bool = False) -> Tensor:
+-    pass  # pragma: no cover
+-
+-
+-@overload
+-def get_train_targets(model: ModelList, transformed: bool = False) -> List[...]:
+-    pass  # pragma: no cover
+-
+-
+-def get_train_targets(model: Model, transformed: bool = False):
+-    return GetTrainTargets(model, transformed=transformed)
+-
+-
+-@GetTrainTargets.register(Model)
+-def _get_train_targets_Model(model: Model, transformed: bool = False) -> Tensor:
+-    Y = model.train_targets
+-
+-    # Note: Avoid using `get_output_transform` here since it creates a Module
+-    transform = getattr(model, "outcome_transform", None)
+-    if transformed or transform is None:
+-        return Y
+-
+-    if model.num_outputs == 1:
+-        return transform.untransform(Y.unsqueeze(-1))[0].squeeze(-1)
+-    return transform.untransform(Y.transpose(-2, -1))[0].transpose(-2, -1)
+-
+-
+-@GetTrainTargets.register(SingleTaskVariationalGP)
+-def _get_train_targets_SingleTaskVariationalGP(
+-    model: Model, transformed: bool = False
+-) -> Tensor:
+-    Y = model.model.train_targets
+-    transform = getattr(model, "outcome_transform", None)
+-    if transformed or transform is None:
+-        return Y
+-
+-    if model.num_outputs == 1:
+-        return transform.untransform(Y.unsqueeze(-1))[0].squeeze(-1)
+-
+-    # SingleTaskVariationalGP.__init__ doesn't bring the multitoutpout dimension inside
+-    return transform.untransform(Y)[0]
+-
+-
+-@GetTrainTargets.register(ModelList)
+-def _get_train_targets_ModelList(
+-    model: ModelList, transformed: bool = False
+-) -> List[...]:
+-    return [get_train_targets(m, transformed=transformed) for m in model.models]
+diff --git a/fbcode/pytorch/botorch/botorch/utils/types.py b/fbcode/pytorch/botorch/botorch/utils/types.py
+--- a/fbcode/pytorch/botorch/botorch/utils/types.py
++++ b/fbcode/pytorch/botorch/botorch/utils/types.py
+@@ -6,16 +6,36 @@
+
+ from __future__ import annotations
+
++from typing import Any, Type, TypeVar
+
++T = TypeVar("T")  # generic type variable
+ NoneType = type(None)  # stop gap for the return of NoneType in 3.10
+
+
++def cast(typ: Type[T], obj: Any, optional: bool = False) -> T:
++    if (optional and obj is None) or isinstance(obj, typ):
++        return obj
++
++    return typ(obj)
++
++
+ class _DefaultType(type):
+     r"""
+-    Private class whose sole instance `DEFAULT` is as a special indicator
++    Private class whose sole instance :code:`DEFAULT` is a special indicator
+     representing that a default value should be assigned to an argument.
+     Typically used in cases where `None` is an allowed argument.
+     """
+
+
+ DEFAULT = _DefaultType("DEFAULT", (), {})
++
++
++class _MissingType(type):
++    r"""
++    Private class whose sole instance :code:`MISSING` is a special indicator
++    representing that an optional argument has not been passed. Typically used
++    in cases where `None` is an allowed argument.
++    """
++
++
++MISSING = _DefaultType("MISSING", (), {})
+diff --git a/fbcode/pytorch/botorch/test/sampling/pathwise/features/test_generators.py b/fbcode/pytorch/botorch/test/sampling/pathwise/features/test_generators.py
+--- a/fbcode/pytorch/botorch/test/sampling/pathwise/features/test_generators.py
++++ b/fbcode/pytorch/botorch/test/sampling/pathwise/features/test_generators.py
+@@ -7,104 +7,105 @@
+ from __future__ import annotations
+
+ from math import ceil
+-from unittest.mock import patch
++from typing import List, Tuple
+
+ import torch
+-from botorch.exceptions.errors import UnsupportedError
+-from botorch.sampling.pathwise.features import generators
+-from botorch.sampling.pathwise.features.generators import gen_kernel_features
+-from botorch.sampling.pathwise.features.maps import FeatureMap
++from botorch.sampling.pathwise.features.generators import gen_kernel_feature_map
++from botorch.sampling.pathwise.utils import is_finite_dimensional, kernel_instancecheck
+ from botorch.utils.testing import BotorchTestCase
+-from gpytorch.kernels import MaternKernel, RBFKernel, ScaleKernel
+-from gpytorch.kernels.kernel import Kernel
+-from torch import Size, Tensor
++from gpytorch import kernels
+
++from ..helpers import gen_module, TestCaseConfig
+
+-class TestFeatureGenerators(BotorchTestCase):
+-    def setUp(self, seed: int = 0) -> None:
++
++class TestGenKernelFeatureMap(BotorchTestCase):
++    def setUp(self) -> None:
+         super().setUp()
++        config = TestCaseConfig(
++            seed=0,
++            device=self.device,
++            num_inputs=2,
++            num_tasks=3,
++            batch_shape=torch.Size([2]),
++        )
+
+-        self.kernels = []
+-        self.num_inputs = d = 2
+-        self.num_features = 4096
+-        for kernel in (
+-            MaternKernel(nu=0.5, batch_shape=Size([])),
+-            MaternKernel(nu=1.5, ard_num_dims=1, active_dims=[0]),
+-            ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=d, batch_shape=Size([2]))),
+-            ScaleKernel(
+-                RBFKernel(ard_num_dims=1, batch_shape=Size([2, 2])), active_dims=[1]
+-            ),
++        self.kernels: List[Tuple[TestCaseConfig, kernels.Kernel]] = []
++        for typ in (
++            kernels.LinearKernel,
++            kernels.IndexKernel,
++            kernels.MaternKernel,
++            kernels.RBFKernel,
++            kernels.ScaleKernel,
++            kernels.ProductKernel,
++            kernels.MultitaskKernel,
++            kernels.AdditiveKernel,
++            kernels.LCMKernel,
+         ):
+-            kernel.to(
+-                dtype=torch.float32 if (seed % 2) else torch.float64, device=self.device
+-            )
+-            with torch.random.fork_rng():
+-                torch.manual_seed(seed)
+-                kern = kernel.base_kernel if isinstance(kernel, ScaleKernel) else kernel
+-                kern.lengthscale = 0.1 + 0.2 * torch.rand_like(kern.lengthscale)
+-                seed += 1
++            self.kernels.append((config, gen_module(typ, config)))
+
+-            self.kernels.append(kernel)
+-
+-    def test_gen_kernel_features(self):
+-        for seed, kernel in enumerate(self.kernels):
++    def test_gen_kernel_feature_map(self, slack: float = 3.0):
++        for config, kernel in self.kernels:
+             with torch.random.fork_rng():
+-                torch.random.manual_seed(seed)
+-                feature_map = gen_kernel_features(
+-                    kernel=kernel,
+-                    num_inputs=self.num_inputs,
+-                    num_outputs=self.num_features,
++                torch.random.manual_seed(config.seed)
++                feature_map = gen_kernel_feature_map(
++                    kernel,
++                    num_ambient_inputs=config.num_inputs,
++                    num_random_features=config.num_random_features,
+                 )
++                self.assertEqual(feature_map.batch_shape, kernel.batch_shape)
+
+                 n = 4
+                 m = ceil(n * kernel.batch_shape.numel() ** -0.5)
+                 for input_batch_shape in ((n**2,), (m, *kernel.batch_shape, m)):
+                     X = torch.rand(
+-                        (*input_batch_shape, self.num_inputs),
++                        (*input_batch_shape, config.num_inputs),
+                         device=kernel.device,
+                         dtype=kernel.dtype,
+                     )
+-                    self._test_gen_kernel_features(kernel, feature_map, X)
++                    if isinstance(kernel, kernels.IndexKernel):  # random task IDs
++                        X[..., kernel.active_dims] = torch.randint(
++                            kernel.raw_var.shape[-1],
++                            size=(*X.shape[:-1], len(kernel.active_dims)),
++                            device=X.device,
++                            dtype=X.dtype,
++                        )
+
+-    def _test_gen_kernel_features(
+-        self, kernel: Kernel, feature_map: FeatureMap, X: Tensor, atol: float = 3.0
+-    ):
+-        with self.subTest("test_initialization"):
+-            self.assertEqual(feature_map.weight.dtype, kernel.dtype)
+-            self.assertEqual(feature_map.weight.device, kernel.device)
+-            self.assertEqual(
+-                feature_map.weight.shape[-1],
+-                self.num_inputs
+-                if kernel.active_dims is None
+-                else len(kernel.active_dims),
+-            )
++                    num_tasks = (
++                        config.num_tasks
++                        if kernel_instancecheck(kernel, kernels.MultitaskKernel)
++                        else 1
++                    )
++                    test_shape = (
++                        *kernel.batch_shape,
++                        num_tasks * X.shape[-2],
++                        *feature_map.output_shape,
++                    )
++                    if len(input_batch_shape) > len(kernel.batch_shape) + 1:
++                        test_shape = (m,) + test_shape
+
+-        with self.subTest("test_covariance"):
+-            features = feature_map(X)
+-            test_shape = torch.broadcast_shapes(
+-                (*X.shape[:-1], self.num_features), kernel.batch_shape + (1, 1)
+-            )
+-            self.assertEqual(features.shape, test_shape)
+-            K0 = features @ features.transpose(-2, -1)
+-            K1 = kernel(X).to_dense()
+-            self.assertTrue(
+-                K0.allclose(K1, atol=atol * self.num_features**-0.5, rtol=0)
+-            )
++                    features = feature_map(X).to_dense()
++                    self.assertEqual(features.shape, test_shape)
++                    covar = kernel(X).to_dense()
+
+-        # Test passing the wrong dimensional shape to `weight_generator`
+-        with self.assertRaisesRegex(UnsupportedError, "2-dim"), patch.object(
+-            generators,
+-            "_gen_fourier_features",
+-            side_effect=lambda **kwargs: kwargs["weight_generator"](Size([])),
+-        ):
+-            gen_kernel_features(
+-                kernel=kernel,
+-                num_inputs=self.num_inputs,
+-                num_outputs=self.num_features,
+-            )
++                    istd = covar.diagonal(dim1=-2, dim2=-1).rsqrt()
++                    corr = istd.unsqueeze(-1) * covar * istd.unsqueeze(-2)
++                    vec = istd.unsqueeze(-1) * features.to_dense().view(
++                        *covar.shape[:-1], -1
++                    )
++                    est = vec @ vec.transpose(-2, -1)
++                    allclose_kwargs = {}
++                    if not is_finite_dimensional(kernel):
++                        num_random_features_per_map = config.num_random_features / (
++                            1
++                            if not is_finite_dimensional(kernel, max_depth=0)
++                            else sum(
++                                not is_finite_dimensional(k)
++                                for k in kernel.modules()
++                                if k is not kernel
++                            )
++                        )
++                        allclose_kwargs["atol"] = (
++                            slack * num_random_features_per_map**-0.5
++                        )
+
+-        # Test requesting an odd number of features
+-        with self.assertRaisesRegex(UnsupportedError, "Expected an even number"):
+-            gen_kernel_features(
+-                kernel=kernel, num_inputs=self.num_inputs, num_outputs=3
+-            )
++                    self.assertTrue(corr.allclose(est, **allclose_kwargs))
+diff --git a/fbcode/pytorch/botorch/test/sampling/pathwise/features/test_maps.py b/fbcode/pytorch/botorch/test/sampling/pathwise/features/test_maps.py
+--- a/fbcode/pytorch/botorch/test/sampling/pathwise/features/test_maps.py
++++ b/fbcode/pytorch/botorch/test/sampling/pathwise/features/test_maps.py
+@@ -6,61 +6,335 @@
+
+ from __future__ import annotations
+
++from math import prod
+ from unittest.mock import MagicMock, patch
+
+ import torch
+-from botorch.sampling.pathwise.features import KernelEvaluationMap, KernelFeatureMap
++from botorch.sampling.pathwise.features import maps
++from botorch.sampling.pathwise.features.generators import gen_kernel_feature_map
++from botorch.sampling.pathwise.utils.transforms import ChainedTransform, FeatureSelector
+ from botorch.utils.testing import BotorchTestCase
+-from gpytorch.kernels import MaternKernel
++from gpytorch import kernels
++from linear_operator.operators import KroneckerProductLinearOperator
+ from torch import Size
++from torch.nn import Module
++
++from ..helpers import gen_module, TestCaseConfig
+
+
+ class TestFeatureMaps(BotorchTestCase):
++    def setUp(self) -> None:
++        super().setUp()
++        self.config = TestCaseConfig(
++            seed=0,
++            device=self.device,
++            num_inputs=2,
++            num_tasks=3,
++            batch_shape=Size([2]),
++        )
++
++        self.base_feature_maps = [
++            gen_kernel_feature_map(gen_module(kernels.LinearKernel, self.config)),
++            gen_kernel_feature_map(gen_module(kernels.IndexKernel, self.config)),
++        ]
++
++    def test_feature_map(self):
++        feature_map = maps.FeatureMap()
++        feature_map.raw_output_shape = Size([2, 3, 4])
++        feature_map.output_transform = None
++        feature_map.device = self.device
++        feature_map.dtype = None
++        self.assertEqual(feature_map.output_shape, (2, 3, 4))
++
++        feature_map.output_transform = lambda x: torch.concat((x, x), dim=-1)
++        self.assertEqual(feature_map.output_shape, (2, 3, 8))
++
++    def test_feature_map_list(self):
++        map_list = maps.FeatureMapList(feature_maps=self.base_feature_maps)
++        self.assertEqual(map_list.device.type, self.config.device.type)
++        self.assertEqual(map_list.dtype, self.config.dtype)
++
++        X = torch.rand(
++            16,
++            self.config.num_inputs,
++            device=self.config.device,
++            dtype=self.config.dtype,
++        )
++        output_list = map_list(X)
++        self.assertIsInstance(output_list, list)
++        self.assertEqual(len(output_list), len(map_list))
++        for feature_map, output in zip(map_list, output_list):
++            self.assertTrue(feature_map(X).to_dense().equal(output.to_dense()))
++
++    def test_direct_sum_feature_map(self):
++        feature_map = maps.DirectSumFeatureMap(self.base_feature_maps)
++        self.assertEqual(
++            feature_map.raw_output_shape,
++            Size([sum(f.output_shape[-1] for f in feature_map)]),
++        )
++        self.assertEqual(
++            feature_map.batch_shape,
++            torch.broadcast_shapes(*(f.batch_shape for f in feature_map)),
++        )
++
++        d = self.config.num_inputs
++        X = torch.rand((16, d), device=self.config.device, dtype=self.config.dtype)
++        features = feature_map(X).to_dense()
++        self.assertEqual(
++            features.shape[-len(feature_map.output_shape) :],
++            feature_map.output_shape,
++        )
++        self.assertTrue(
++            features.equal(torch.concat([f(X).to_dense() for f in feature_map], dim=-1))
++        )
++
++        # Test mixture of matrix-valued and vector-valued maps
++        real_map = feature_map[0]
++        mock_map = MagicMock(
++            side_effect=lambda x: x.unsqueeze(-1).expand(
++                *real_map.batch_shape, *x.shape, d
++            )
++        )
++        mock_map.output_shape = Size([d, d])
++        with patch.dict(feature_map._modules, {"feature_maps": [mock_map, real_map]}):
++            self.assertEqual(
++                feature_map.output_shape, Size([d, d + real_map.output_shape[0]])
++            )
++            features = feature_map(X).to_dense()
++            self.assertTrue(features[..., :d].equal(mock_map(X)))
++            self.assertTrue(
++                features[..., d:].eq((d**-0.5) * real_map(X).unsqueeze(-1)).all()
++            )
++
++    def test_hadamard_product_feature_map(self):
++        feature_map = maps.HadamardProductFeatureMap(self.base_feature_maps)
++        self.assertEqual(
++            feature_map.raw_output_shape,
++            torch.broadcast_shapes(*(f.output_shape for f in feature_map)),
++        )
++        self.assertEqual(
++            feature_map.batch_shape,
++            torch.broadcast_shapes(*(f.batch_shape for f in feature_map)),
++        )
++
++        d = self.config.num_inputs
++        X = torch.rand((16, d), device=self.config.device, dtype=self.config.dtype)
++        features = feature_map(X).to_dense()
++        self.assertEqual(
++            features.shape[-len(feature_map.output_shape) :],
++            feature_map.output_shape,
++        )
++        self.assertTrue(features.equal(prod([f(X).to_dense() for f in feature_map])))
++
++    def test_sparse_direct_sum_feature_map(self):
++        feature_map = maps.SparseDirectSumFeatureMap(self.base_feature_maps)
++        self.assertEqual(
++            feature_map.raw_output_shape,
++            Size([sum(f.output_shape[-1] for f in feature_map)]),
++        )
++        self.assertEqual(
++            feature_map.batch_shape,
++            torch.broadcast_shapes(*(f.batch_shape for f in feature_map)),
++        )
++
++        d = self.config.num_inputs
++        X = torch.rand((16, d), device=self.config.device, dtype=self.config.dtype)
++        features = feature_map(X).to_dense()
++        self.assertEqual(
++            features.shape[-len(feature_map.output_shape) :],
++            feature_map.output_shape,
++        )
++        self.assertTrue(
++            features.equal(torch.concat([f(X).to_dense() for f in feature_map], dim=-1))
++        )
++
++        # Test mixture of matrix-valued and vector-valued maps
++        real_map = feature_map[0]
++        mock_map = MagicMock(
++            side_effect=lambda x: x.unsqueeze(-1).expand(
++                *real_map.batch_shape, *x.shape, d
++            )
++        )
++        mock_map.output_shape = Size([d, d])
++        with patch.dict(feature_map._modules, {"feature_maps": [mock_map, real_map]}):
++            self.assertEqual(
++                feature_map.output_shape, Size([d, d + real_map.output_shape[0]])
++            )
++            features = feature_map(X).to_dense()
++            self.assertTrue(features[..., :d, :d].equal(mock_map(X)))
++            self.assertTrue(features[..., d:, d:].eq(real_map(X).unsqueeze(-2)).all())
++
++    def test_outer_product_feature_map(self):
++        feature_map = maps.OuterProductFeatureMap(self.base_feature_maps)
++        self.assertEqual(
++            feature_map.raw_output_shape,
++            Size([prod(f.output_shape[-1] for f in feature_map)]),
++        )
++        self.assertEqual(
++            feature_map.batch_shape,
++            torch.broadcast_shapes(*(f.batch_shape for f in feature_map)),
++        )
++
++        d = self.config.num_inputs
++        X = torch.rand((16, d), device=self.config.device, dtype=self.config.dtype)
++        features = feature_map(X).to_dense()
++        self.assertEqual(
++            features.shape[-len(feature_map.output_shape) :],
++            feature_map.output_shape,
++        )
++
++        test_features = (
++            feature_map[0](X).to_dense().unsqueeze(-1)
++            * feature_map[1](X).to_dense().unsqueeze(-2)
++        ).view(features.shape)
++        self.assertTrue(features.equal(test_features))
++
++
++class TestKernelFeatureMaps(BotorchTestCase):
++    def setUp(self) -> None:
++        super().setUp()
++        self.configs = [
++            TestCaseConfig(
++                seed=0,
++                device=self.device,
++                num_inputs=2,
++                num_tasks=3,
++                batch_shape=Size([2]),
++            )
++        ]
++
++    def test_fourier_feature_map(self):
++        for config in self.configs:
++            tkwargs = {"device": config.device, "dtype": config.dtype}
++            kernel = gen_module(kernels.RBFKernel, config)
++            weight = torch.randn(*kernel.batch_shape, 16, config.num_inputs, **tkwargs)
++            bias = torch.rand(*kernel.batch_shape, 16, **tkwargs)
++            feature_map = maps.FourierFeatureMap(
++                kernel=kernel, weight=weight, bias=bias
++            )
++            self.assertEqual(feature_map.output_shape, (16,))
++
++            X = torch.rand(32, config.num_inputs, **tkwargs)
++            features = feature_map(X)
++            self.assertEqual(
++                features.shape[-len(feature_map.output_shape) :],
++                feature_map.output_shape,
++            )
++            self.assertTrue(
++                features.equal(X @ weight.transpose(-2, -1) + bias.unsqueeze(-2))
++            )
++
++    def test_index_kernel_feature_map(self):
++        for config in self.configs:
++            kernel = gen_module(kernels.IndexKernel, config)
++            tkwargs = {"device": config.device, "dtype": config.dtype}
++            feature_map = maps.IndexKernelFeatureMap(kernel=kernel)
++            self.assertEqual(feature_map.output_shape, kernel.raw_var.shape[-1:])
++
++            X = torch.rand(*config.batch_shape, 16, config.num_inputs, **tkwargs)
++            index_shape = (*config.batch_shape, 16, len(kernel.active_dims))
++            indices = X[..., kernel.active_dims] = torch.randint(
++                config.num_tasks, size=index_shape, **tkwargs
++            )
++            indices = indices.long().squeeze(-1)
++            features = feature_map(X).to_dense()
++            self.assertEqual(
++                features.shape[-len(feature_map.output_shape) :],
++                feature_map.output_shape,
++            )
++
++            cholesky = kernel.covar_matrix.cholesky().to_dense()
++            test_features = []
++            for chol, idx in zip(
++                cholesky.view(-1, *cholesky.shape[-2:]),
++                indices.view(-1, *indices.shape[-1:]),
++            ):
++                test_features.append(chol.index_select(dim=-2, index=idx))
++            test_features = torch.stack(test_features).view(features.shape)
++            self.assertTrue(features.equal(test_features))
++
+     def test_kernel_evaluation_map(self):
+-        kernel = MaternKernel(nu=2.5, ard_num_dims=2, batch_shape=Size([2]))
+-        kernel.to(device=self.device)
+-        with torch.random.fork_rng():
+-            torch.manual_seed(0)
+-            kernel.lengthscale = 0.1 + 0.3 * torch.rand_like(kernel.lengthscale)
+-
+-        with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
+-            KernelEvaluationMap(kernel=kernel, points=torch.rand(4, 3, 2))
+-
+-        for dtype in (torch.float32, torch.float64):
+-            kernel.to(dtype=dtype)
+-            X0, X1 = torch.rand(5, 2, dtype=dtype, device=self.device).split([2, 3])
+-            kernel_map = KernelEvaluationMap(kernel=kernel, points=X1)
+-            self.assertEqual(kernel_map.batch_shape, kernel.batch_shape)
+-            self.assertEqual(kernel_map.num_outputs, X1.shape[-1])
+-            self.assertTrue(kernel_map(X0).to_dense().equal(kernel(X0, X1).to_dense()))
+-
+-        with patch.object(
+-            kernel_map, "output_transform", new=lambda z: torch.concat([z, z], dim=-1)
+-        ):
+-            self.assertEqual(kernel_map.num_outputs, 2 * X1.shape[-1])
++        for config in self.configs:
++            kernel = gen_module(kernels.RBFKernel, config)
++            tkwargs = {"device": config.device, "dtype": config.dtype}
++            points = torch.rand(4, config.num_inputs, **tkwargs)
++            feature_map = maps.KernelEvaluationMap(kernel=kernel, points=points)
++            self.assertEqual(
++                feature_map.raw_output_shape, feature_map.points.shape[-2:-1]
++            )
++
++            X = torch.rand(16, config.num_inputs, **tkwargs)
++            features = feature_map(X).to_dense()
++            self.assertEqual(
++                features.shape[-len(feature_map.output_shape) :],
++                feature_map.output_shape,
++            )
++            self.assertTrue(features.equal(kernel(X, points).to_dense()))
+
+     def test_kernel_feature_map(self):
+-        d = 2
+-        m = 3
+-        weight = torch.rand(m, d, device=self.device)
+-        bias = torch.rand(m, device=self.device)
+-        kernel = MaternKernel(nu=2.5, batch_shape=Size([3])).to(self.device)
+-        feature_map = KernelFeatureMap(
+-            kernel=kernel,
+-            weight=weight,
+-            bias=bias,
+-            input_transform=MagicMock(side_effect=lambda x: x),
+-            output_transform=MagicMock(side_effect=lambda z: z.exp()),
+-        )
+-
+-        X = torch.rand(2, d, device=self.device)
+-        features = feature_map(X)
+-        feature_map.input_transform.assert_called_once_with(X)
+-        feature_map.output_transform.assert_called_once()
+-        self.assertTrue((X @ weight.transpose(-2, -1) + bias).exp().equal(features))
+-
+-        # Test batch_shape and num_outputs
+-        self.assertIs(feature_map.batch_shape, kernel.batch_shape)
+-        self.assertEqual(feature_map.num_outputs, weight.shape[-2])
+-        with patch.object(feature_map, "output_transform", new=None):
+-            self.assertEqual(feature_map.num_outputs, weight.shape[-2])
++        for config in self.configs:
++            kernel = gen_module(kernels.RBFKernel, config)
++            kernel.active_dims = torch.tensor([0], device=config.device)
++
++            feature_map = maps.KernelFeatureMap(kernel=kernel)
++            self.assertEqual(feature_map.batch_shape, kernel.batch_shape)
++            self.assertIsInstance(feature_map.input_transform, FeatureSelector)
++            self.assertIsNone(
++                maps.KernelFeatureMap(kernel, ignore_active_dims=True).input_transform
++            )
++            self.assertIsInstance(
++                maps.KernelFeatureMap(kernel, input_transform=Module()).input_transform,
++                ChainedTransform,
++            )
++
++    def test_linear_kernel_feature_map(self):
++        for config in self.configs:
++            kernel = gen_module(kernels.LinearKernel, config)
++            tkwargs = {"device": config.device, "dtype": config.dtype}
++            active_dims = (
++                tuple(range(config.num_inputs))
++                if kernel.active_dims is None
++                else kernel.active_dims
++            )
++            feature_map = maps.LinearKernelFeatureMap(
++                kernel=kernel, raw_output_shape=Size([len(active_dims)])
++            )
++
++            X = torch.rand(*kernel.batch_shape, 16, config.num_inputs, **tkwargs)
++            features = feature_map(X).to_dense()
++            self.assertEqual(
++                features.shape[-len(feature_map.output_shape) :],
++                feature_map.output_shape,
++            )
++            self.assertTrue(
++                features.equal(kernel.variance.sqrt() * X[..., active_dims])
++            )
++
++    def test_multitask_kernel_feature_map(self):
++        for config in self.configs:
++            kernel = gen_module(kernels.MultitaskKernel, config)
++            tkwargs = {"device": config.device, "dtype": config.dtype}
++            data_map = gen_kernel_feature_map(
++                kernel=kernel.data_covar_module,
++                num_inputs=config.num_inputs,
++                num_random_features=config.num_random_features,
++            )
++            feature_map = maps.MultitaskKernelFeatureMap(
++                kernel=kernel, data_feature_map=data_map
++            )
++            self.assertEqual(
++                feature_map.output_shape,
++                (feature_map.num_tasks * data_map.output_shape[0],)
++                + data_map.output_shape[1:],
++            )
++
++            X = torch.rand(*kernel.batch_shape, 16, config.num_inputs, **tkwargs)
++
++            features = feature_map(X).to_dense()
++            self.assertEqual(
++                features.shape[-len(feature_map.output_shape) :],
++                feature_map.output_shape,
++            )
++            cholesky = kernel.task_covar_module.covar_matrix.cholesky()
++            test_features = KroneckerProductLinearOperator(data_map(X), cholesky)
++            self.assertTrue(features.equal(test_features.to_dense()))
+diff --git a/fbcode/pytorch/botorch/test/sampling/pathwise/helpers.py b/fbcode/pytorch/botorch/test/sampling/pathwise/helpers.py
+--- a/fbcode/pytorch/botorch/test/sampling/pathwise/helpers.py
++++ b/fbcode/pytorch/botorch/test/sampling/pathwise/helpers.py
+@@ -6,28 +6,300 @@
+
+ from __future__ import annotations
+
+-from typing import Tuple
++from contextlib import nullcontext
++from dataclasses import dataclass, field, replace
++from functools import partial
++from typing import Any, Callable, Dict, Iterable, Iterator, Optional, Type, TypeVar
+
++import torch
++from botorch import models
++from botorch.exceptions.errors import UnsupportedError
++from botorch.models.model import Model
++from botorch.models.transforms.input import Normalize
+ from botorch.models.transforms.outcome import Standardize
+-from torch import Size, Tensor
++from botorch.sampling.pathwise.utils import get_train_inputs
++from gpytorch import kernels
++from torch import Size
++from torch.nn.functional import pad
+
++T = TypeVar("T")
++TFactory = Callable[[], Iterator[T]]
+
+-def get_sample_moments(samples: Tensor, sample_shape: Size) -> Tuple[Tensor, Tensor]:
+-    sample_dim = len(sample_shape)
+-    samples = samples.view(-1, *samples.shape[sample_dim:])
+-    loc = samples.mean(dim=0)
+-    residuals = (samples - loc).permute(*range(1, samples.ndim), 0)
+-    return loc, (residuals @ residuals.transpose(-2, -1)) / sample_shape.numel()
+
++@dataclass(frozen=True)
++class TestCaseConfig:
++    device: torch.device
++    dtype: torch.dtype = torch.float64
++    seed: int = 0
++    num_inputs: int = 2
++    num_tasks: int = 2
++    num_train: int = 5
++    batch_shape: Size = field(default_factory=Size)
++    num_random_features: int = 2048
+
+-def standardize_moments(
+-    transform: Standardize,
+-    loc: Tensor,
+-    covariance_matrix: Tensor,
+-) -> Tuple[Tensor, Tensor]:
+
+-    m = transform.means.squeeze().unsqueeze(-1)
+-    s = transform.stdvs.squeeze().reciprocal().unsqueeze(-1)
+-    loc = s * (loc - m)
+-    correlation_matrix = s.unsqueeze(-1) * covariance_matrix * s.unsqueeze(-2)
+-    return loc, correlation_matrix
++class FactoryFunctionRegistry:
++    def __init__(self, factories: Optional[Dict[T, TFactory]] = None):
++        self.factories = {} if factories is None else factories
++
++    def register(self, typ: T, **kwargs: Any) -> None:
++        def _(factory: TFactory) -> TFactory:
++            self.set_factory(typ, factory, **kwargs)
++            return factory
++
++        return _
++
++    def set_factory(self, typ: T, factory: TFactory, exist_ok: bool = False) -> None:
++        if not exist_ok and typ in self.factories:
++            raise ValueError(f"A factory for {typ} already exists but {exist_ok=}.")
++        self.factories[typ] = factory
++
++    def get_factory(self, typ: T) -> Optional[TFactory]:
++        return self.factories.get(typ)
++
++    def __call__(self, typ: T, *args: Any, **kwargs: Any) -> T:
++        factory = self.get_factory(typ)
++        if factory is None:
++            raise RuntimeError(f"Factory lookup failed for {typ=}.")
++        return factory(*args, **kwargs)
++
++
++def gen_random_inputs(
++    model: Model,
++    batch_shape: Iterable[int],
++    transformed: bool = False,
++    task_id: Optional[int] = None,
++    seed: Optional[int] = None,
++) -> torch.Tensor:
++    with (nullcontext() if seed is None else torch.random.fork_rng()):
++        if seed:
++            torch.random.manual_seed(seed)
++
++        (train_X,) = get_train_inputs(model, transformed=True)
++        tkwargs = {"device": train_X.device, "dtype": train_X.dtype}
++        X = torch.rand((*batch_shape, train_X.shape[-1]), **tkwargs)
++        if isinstance(model, models.MultiTaskGP):
++            num_tasks = model.task_covar_module.raw_var.shape[-1]
++            X[..., model._task_feature] = (
++                torch.randint(num_tasks, size=X.shape[:-1], **tkwargs)
++                if task_id is None
++                else task_id
++            )
++
++        if not transformed and hasattr(model, "input_transform"):
++            return model.input_transform.untransform(X)
++
++        return X
++
++
++gen_module = FactoryFunctionRegistry()
++
++
++def _randomize_lengthscales(
++    kernel: kernels.Kernel, seed: Optional[int] = None
++) -> kernels.Kernel:
++    if kernel.ard_num_dims is None:
++        raise NotImplementedError
++
++    with (nullcontext() if seed is None else torch.random.fork_rng()):
++        if seed:
++            torch.random.manual_seed(seed)
++
++        kernel.lengthscale = (0.25 * kernel.ard_num_dims**0.5) * (
++            0.25 + 0.75 * torch.rand_like(kernel.lengthscale)
++        )
++
++    return kernel
++
++
++@gen_module.register(kernels.RBFKernel)
++def _gen_kernel_rbf(config: TestCaseConfig, **kwargs: Any) -> kernels.RBFKernel:
++    kwargs.setdefault("batch_shape", config.batch_shape)
++    kwargs.setdefault("ard_num_dims", config.num_inputs)
++
++    kernel = kernels.RBFKernel(**kwargs)
++    return _randomize_lengthscales(
++        kernel.to(device=config.device, dtype=config.dtype), seed=config.seed
++    )
++
++
++@gen_module.register(kernels.MaternKernel)
++def _gen_kernel_matern(config: TestCaseConfig, **kwargs: Any) -> kernels.MaternKernel:
++    kwargs.setdefault("batch_shape", config.batch_shape)
++    kwargs.setdefault("ard_num_dims", config.num_inputs)
++    kwargs.setdefault("nu", 2.5)
++    kernel = kernels.MaternKernel(**kwargs)
++    return _randomize_lengthscales(
++        kernel.to(device=config.device, dtype=config.dtype), seed=config.seed
++    )
++
++
++@gen_module.register(kernels.LinearKernel)
++def _gen_kernel_linear(config: TestCaseConfig, **kwargs: Any) -> kernels.LinearKernel:
++    kwargs.setdefault("batch_shape", config.batch_shape)
++    kwargs.setdefault("active_dims", [0])
++
++    kernel = kernels.LinearKernel(**kwargs)
++    return kernel.to(device=config.device, dtype=config.dtype)
++
++
++@gen_module.register(kernels.IndexKernel)
++def _gen_kernel_index(config: TestCaseConfig, **kwargs: Any) -> kernels.IndexKernel:
++    kwargs.setdefault("batch_shape", config.batch_shape)
++    kwargs.setdefault("num_tasks", config.num_tasks)
++    kwargs.setdefault("rank", kwargs["num_tasks"])
++    kwargs.setdefault("active_dims", [0])
++
++    kernel = kernels.IndexKernel(**kwargs)
++    return kernel.to(device=config.device, dtype=config.dtype)
++
++
++@gen_module.register(kernels.ScaleKernel)
++def _gen_kernel_scale(config: TestCaseConfig, **kwargs: Any) -> kernels.ScaleKernel:
++    kernel = kernels.ScaleKernel(gen_module(kernels.LinearKernel, config), **kwargs)
++    return kernel.to(device=config.device, dtype=config.dtype)
++
++
++@gen_module.register(kernels.ProductKernel)
++def _gen_kernel_product(config: TestCaseConfig, **kwargs: Any) -> kernels.ProductKernel:
++    kernel = kernels.ProductKernel(
++        gen_module(kernels.RBFKernel, config),
++        gen_module(kernels.LinearKernel, config),
++        **kwargs,
++    )
++    return kernel.to(device=config.device, dtype=config.dtype)
++
++
++@gen_module.register(kernels.AdditiveKernel)
++def _gen_kernel_additive(
++    config: TestCaseConfig, **kwargs: Any
++) -> kernels.AdditiveKernel:
++    kernel = kernels.AdditiveKernel(
++        gen_module(kernels.RBFKernel, config),
++        gen_module(kernels.LinearKernel, config),
++        **kwargs,
++    )
++    return kernel.to(device=config.device, dtype=config.dtype)
++
++
++@gen_module.register(kernels.MultitaskKernel)
++def _gen_kernel_multitask(
++    config: TestCaseConfig, **kwargs: Any
++) -> kernels.MultitaskKernel:
++    kwargs.setdefault("batch_shape", config.batch_shape)
++    kwargs.setdefault("num_tasks", config.num_tasks)
++    kwargs.setdefault("rank", kwargs["num_tasks"])
++
++    kernel = kernels.MultitaskKernel(gen_module(kernels.LinearKernel, config), **kwargs)
++    return kernel.to(device=config.device, dtype=config.dtype)
++
++
++@gen_module.register(kernels.LCMKernel)
++def _gen_kernel_lcm(config: TestCaseConfig, **kwargs) -> kernels.LCMKernel:
++    kwargs.setdefault("num_tasks", config.num_tasks)
++    kwargs.setdefault("rank", kwargs["num_tasks"])
++
++    base_kernels = (
++        gen_module(kernels.RBFKernel, config),
++        gen_module(kernels.LinearKernel, config),
++    )
++    kernel = kernels.LCMKernel(base_kernels, **kwargs)
++    return kernel.to(device=config.device, dtype=config.dtype)
++
++
++def _gen_single_task_model(
++    model_type: Type[Model],
++    config: TestCaseConfig,
++    covar_module: Optional[kernels.Kernel] = None,
++) -> Model:
++    if len(config.batch_shape) > 1:
++        raise NotImplementedError
++
++    d = config.num_inputs
++    n = config.num_train
++    tkwargs = {"device": config.device, "dtype": config.dtype}
++    with torch.random.fork_rng():
++        torch.random.manual_seed(config.seed)
++        covar_module = covar_module or gen_module(kernels.MaternKernel, config)
++        uppers = 1 + 9 * torch.rand(d, **tkwargs)
++        bounds = pad(uppers.unsqueeze(0), (0, 0, 1, 0))
++        X = uppers * torch.rand(n, d, **tkwargs)
++        Y = X @ torch.randn(*config.batch_shape, d, 1, **tkwargs)
++        if config.batch_shape:
++            Y = Y.squeeze(-1).transpose(-2, -1)
++
++        model_args = {
++            "train_X": X,
++            "train_Y": Y,
++            "covar_module": covar_module,
++            "input_transform": Normalize(d=X.shape[-1], bounds=bounds),
++            "outcome_transform": Standardize(m=Y.shape[-1]),
++        }
++        if model_type is models.SingleTaskGP:
++            model = models.SingleTaskGP(**model_args)
++        elif model_type is models.FixedNoiseGP:
++            model = models.FixedNoiseGP(
++                train_Yvar=0.1 * torch.rand_like(Y, **tkwargs), **model_args
++            )
++        elif model_type is models.SingleTaskVariationalGP:
++            model = models.SingleTaskVariationalGP(
++                num_outputs=Y.shape[-1], **model_args
++            )
++        else:
++            raise UnsupportedError(f"Encounted unexpected model type: {model_type}.")
++
++    return model.to(**tkwargs)
++
++
++for typ in (models.FixedNoiseGP, models.SingleTaskGP, models.SingleTaskVariationalGP):
++    gen_module.set_factory(typ, partial(_gen_single_task_model, typ))
++
++
++@gen_module.register(models.ModelListGP)
++def _gen_model_list(config: TestCaseConfig, **kwargs: Any) -> models.ModelListGP:
++    return models.ModelListGP(
++        gen_module(models.SingleTaskGP, config),
++        gen_module(models.SingleTaskGP, replace(config, seed=config.seed + 1)),
++        **kwargs,
++    )
++
++
++@gen_module.register(models.MultiTaskGP)
++def _gen_model_multitask(
++    config: TestCaseConfig,
++    covar_module: Optional[kernels.Kernel] = None,
++) -> models.MultiTaskGP:
++    d = config.num_inputs
++    if d == 1:
++        raise NotImplementedError("MultiTaskGP inputs must have two or more features.")
++
++    m = config.num_tasks
++    n = config.num_train
++    tkwargs = {"device": config.device, "dtype": config.dtype}
++    batch_shape = Size()  # MTGP currently does not support batch mode
++    with torch.random.fork_rng():
++        torch.random.manual_seed(config.seed)
++        covar_module = covar_module or gen_module(
++            kernels.MaternKernel, replace(config, num_inputs=d - 1)
++        )
++        X = torch.concat(
++            [
++                torch.rand(*batch_shape, m, n, d - 1, **tkwargs),
++                torch.arange(m, **tkwargs)[:, None, None].repeat(*batch_shape, 1, n, 1),
++            ],
++            dim=-1,
++        )
++        Y = (X[..., :-1] * torch.randn(*batch_shape, m, n, d - 1, **tkwargs)).sum(-1)
++        X = X.view(*batch_shape, -1, d)
++        Y = Y.view(*batch_shape, -1, 1)
++
++        model = models.MultiTaskGP(
++            train_X=X,
++            train_Y=Y,
++            task_feature=-1,
++            rank=m,
++            covar_module=covar_module,
++            outcome_transform=Standardize(m=Y.shape[-1], batch_shape=batch_shape),
++        )
++
++    return model.to(**tkwargs)
+diff --git a/fbcode/pytorch/botorch/test/sampling/pathwise/test_paths.py b/fbcode/pytorch/botorch/test/sampling/pathwise/test_paths.py
+--- a/fbcode/pytorch/botorch/test/sampling/pathwise/test_paths.py
++++ b/fbcode/pytorch/botorch/test/sampling/pathwise/test_paths.py
+@@ -20,7 +20,7 @@
+
+ class TestGenericPaths(BotorchTestCase):
+     def test_path_dict(self):
+-        with self.assertRaisesRegex(UnsupportedError, "must be preceded by a join"):
++        with self.assertRaisesRegex(UnsupportedError, "preceded by a `reducer`"):
+             PathDict(output_transform="foo")
+
+         A = IdentityPath()
+@@ -42,7 +42,7 @@
+         self.assertTrue(x.equal(output.pop("1")))
+         self.assertTrue(not output)
+
+-        path_dict.join = torch.stack
++        path_dict.reducer = torch.stack
+         output = path_dict(x)
+         self.assertIsInstance(output, torch.Tensor)
+         self.assertEqual(output.shape, (2,) + x.shape)
+@@ -67,7 +67,7 @@
+         self.assertEqual(("0",), tuple(path_dict))
+
+     def test_path_list(self):
+-        with self.assertRaisesRegex(UnsupportedError, "must be preceded by a join"):
++        with self.assertRaisesRegex(UnsupportedError, "preceded by a `reducer`"):
+             PathList(output_transform="foo")
+
+         # Test __init__
+@@ -88,7 +88,7 @@
+         self.assertTrue(x.equal(output.pop()))
+         self.assertTrue(not output)
+
+-        path_list.join = torch.stack
++        path_list.reducer = torch.stack
+         output = path_list(x)
+         self.assertIsInstance(output, torch.Tensor)
+         self.assertEqual(output.shape, (2,) + x.shape)
+diff --git a/fbcode/pytorch/botorch/test/sampling/pathwise/test_posterior_samplers.py b/fbcode/pytorch/botorch/test/sampling/pathwise/test_posterior_samplers.py
+--- a/fbcode/pytorch/botorch/test/sampling/pathwise/test_posterior_samplers.py
++++ b/fbcode/pytorch/botorch/test/sampling/pathwise/test_posterior_samplers.py
+@@ -6,148 +6,152 @@
+
+ from __future__ import annotations
+
+-from collections import defaultdict
+-from copy import deepcopy
+-from itertools import product
++from dataclasses import replace
++from functools import partial
+
+ import torch
+-from botorch.models import (
+-    FixedNoiseGP,
+-    ModelListGP,
+-    SingleTaskGP,
+-    SingleTaskVariationalGP,
++from botorch import models
++from botorch.models import SingleTaskVariationalGP
++from botorch.sampling.pathwise import (
++    draw_kernel_feature_paths,
++    draw_matheron_paths,
++    MatheronPath,
++    PathList,
+ )
+-from botorch.models.transforms.input import Normalize
+-from botorch.models.transforms.outcome import Standardize
+-from botorch.sampling.pathwise import draw_matheron_paths, MatheronPath, PathList
+-from botorch.sampling.pathwise.utils import get_train_inputs
++from botorch.sampling.pathwise.utils import is_finite_dimensional
++from botorch.utils.context_managers import delattr_ctx
+ from botorch.utils.testing import BotorchTestCase
+-from gpytorch.kernels import MaternKernel, ScaleKernel
++from gpytorch.distributions import MultitaskMultivariateNormal
+ from torch import Size
+-from torch.nn.functional import pad
+
+-from .helpers import get_sample_moments, standardize_moments
++from .helpers import gen_module, gen_random_inputs, TestCaseConfig
+
+
+-class TestPosteriorSamplers(BotorchTestCase):
++class TestDrawMatheronPaths(BotorchTestCase):
+     def setUp(self) -> None:
+         super().setUp()
+-        self.models = defaultdict(list)
++        config = TestCaseConfig(seed=0, device=self.device)
++        batch_config = replace(config, batch_shape=Size([2]))
++
++        self.base_models = [
++            (batch_config, gen_module(models.SingleTaskGP, batch_config)),
++            (batch_config, gen_module(models.FixedNoiseGP, batch_config)),
++            (batch_config, gen_module(models.MultiTaskGP, batch_config)),
++            (config, gen_module(models.SingleTaskVariationalGP, config)),
++        ]
++        self.model_lists = [
++            (batch_config, gen_module(models.ModelListGP, batch_config))
++        ]
++
++    def test_base_models(self, slack: float = 3.0):
++        sample_shape = Size([32, 32])
++        for config, model in self.base_models:
++            kernel = (
++                model.model.covar_module
++                if isinstance(model, models.SingleTaskVariationalGP)
++                else model.covar_module
++            )
++            base_features = list(range(config.num_inputs))
++            if isinstance(model, models.MultiTaskGP):
++                del base_features[model._task_feature]
+
+-        seed = 0
+-        for kernel in (
+-            ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=2, batch_shape=Size([]))),
+-        ):
+             with torch.random.fork_rng():
+-                torch.manual_seed(seed)
+-                tkwargs = {"device": self.device, "dtype": torch.float64}
+-
+-                base = kernel.base_kernel if isinstance(kernel, ScaleKernel) else kernel
+-                base.lengthscale = 0.1 + 0.3 * torch.rand_like(base.lengthscale)
+-                kernel.to(**tkwargs)
+-
+-                uppers = 1 + 9 * torch.rand(base.lengthscale.shape[-1], **tkwargs)
+-                bounds = pad(uppers.unsqueeze(0), (0, 0, 1, 0))
+-
+-                X = uppers * torch.rand(4, base.lengthscale.shape[-1], **tkwargs)
+-                Y = 10 * kernel(X).cholesky() @ torch.randn(4, 1, **tkwargs)
+-                if kernel.batch_shape:
+-                    Y = Y.squeeze(-1).transpose(0, 1)  # n x m
+-
+-                input_transform = Normalize(d=X.shape[-1], bounds=bounds)
+-                outcome_transform = Standardize(m=Y.shape[-1])
+-
+-                # SingleTaskGP in eval mode
+-                self.models[SingleTaskGP].append(
+-                    SingleTaskGP(
+-                        train_X=X,
+-                        train_Y=Y,
+-                        covar_module=deepcopy(kernel),
+-                        input_transform=deepcopy(input_transform),
+-                        outcome_transform=deepcopy(outcome_transform),
+-                    )
+-                    .to(**tkwargs)
+-                    .eval()
++                torch.random.manual_seed(config.seed)
++                paths = draw_matheron_paths(
++                    model=model,
++                    sample_shape=sample_shape,
++                    prior_sampler=partial(
++                        draw_kernel_feature_paths,
++                        num_random_features=config.num_random_features,
++                    ),
+                 )
+-
+-                # FixedNoiseGP in train mode
+-                self.models[FixedNoiseGP].append(
+-                    FixedNoiseGP(
+-                        train_X=X,
+-                        train_Y=Y,
+-                        train_Yvar=0.01 * torch.rand_like(Y),
+-                        covar_module=kernel,
+-                        input_transform=input_transform,
+-                        outcome_transform=outcome_transform,
+-                    ).to(**tkwargs)
++                self.assertIsInstance(paths, MatheronPath)
++                n = 16
++                Z = gen_random_inputs(
++                    model,
++                    batch_shape=[n],
++                    transformed=True,
++                    task_id=0,  # only used by multi-task models
+                 )
+-
+-                # SingleTaskVariationalGP in train mode
+-                self.models[SingleTaskVariationalGP].append(
+-                    SingleTaskVariationalGP(
+-                        train_X=X,
+-                        train_Y=Y,
+-                        covar_module=kernel,
+-                        input_transform=input_transform,
+-                        outcome_transform=outcome_transform,
+-                    ).to(**tkwargs)
++                X = (
++                    model.input_transform.untransform(Z)
++                    if hasattr(model, "input_transform")
++                    else Z
+                 )
+
+-            seed += 1
+-
+-    def test_draw_matheron_paths(self):
+-        for seed, models in enumerate(self.models.values()):
+-            for model, sample_shape in product(models, [Size([1024]), Size([32, 32])]):
+-                with torch.random.fork_rng():
+-                    torch.random.manual_seed(seed)
+-                    paths = draw_matheron_paths(model=model, sample_shape=sample_shape)
+-                    self.assertIsInstance(paths, MatheronPath)
+-                    self._test_draw_matheron_paths(model, paths, sample_shape)
+-
+-        with self.subTest("test_model_list"):
+-            model_list = ModelListGP(
+-                self.models[SingleTaskGP][0], self.models[FixedNoiseGP][0]
+-            )
+-            path_list = draw_matheron_paths(model_list, sample_shape=sample_shape)
+-            (train_X,) = get_train_inputs(model_list.models[0], transformed=False)
+-            X = torch.zeros(
+-                4, train_X.shape[-1], dtype=train_X.dtype, device=self.device
++            samples = paths(X)
++            model.eval()
++            with delattr_ctx(model, "outcome_transform"):
++                posterior = (
++                    model.posterior(X[..., base_features], output_indices=[0])
++                    if isinstance(model, models.MultiTaskGP)
++                    else model.posterior(X)
++                )
++                mvn = posterior.mvn
++
++            if isinstance(mvn, MultitaskMultivariateNormal):
++                num_tasks = kernel.batch_shape[0]
++                exact_mean = mvn.mean.transpose(-2, -1)
++                exact_covar = mvn.covariance_matrix.view(num_tasks, n, num_tasks, n)
++                exact_covar = torch.stack(
++                    [exact_covar[..., i, :, i, :] for i in range(num_tasks)], dim=-3
++                )
++            else:
++                exact_mean = mvn.mean
++                exact_covar = mvn.covariance_matrix
++
++            # Divide by prior standard deviations to put things on the same scale
++            prior = (
++                model.forward(Z, prior=True)
++                if isinstance(model, SingleTaskVariationalGP)
++                else model.forward(Z)
+             )
+-            sample_list = path_list(X)
+-            self.assertIsInstance(path_list, PathList)
+-            self.assertIsInstance(sample_list, list)
+-            self.assertEqual(len(sample_list), len(path_list.paths))
+-
+-    def _test_draw_matheron_paths(self, model, paths, sample_shape, atol=3):
+-        (train_X,) = get_train_inputs(model, transformed=False)
+-        X = torch.rand(16, train_X.shape[-1], dtype=train_X.dtype, device=self.device)
+-
+-        # Evaluate sample paths and compute sample statistics
+-        samples = paths(X)
+-        batch_shape = (
+-            model.model.covar_module.batch_shape
+-            if isinstance(model, SingleTaskVariationalGP)
+-            else model.covar_module.batch_shape
+-        )
+-        self.assertEqual(samples.shape, sample_shape + batch_shape + X.shape[-2:-1])
+-
+-        sample_moments = get_sample_moments(samples, sample_shape)
+-        if hasattr(model, "outcome_transform"):
+-            # Do this instead of untransforming exact moments
+-            sample_moments = standardize_moments(
+-                model.outcome_transform, *sample_moments
++            istd = prior.covariance_matrix.diagonal(dim1=-2, dim2=-1).rsqrt()
++            exact_mean = istd * exact_mean
++            exact_covar = istd.unsqueeze(-1) * exact_covar * istd.unsqueeze(-2)
++            if hasattr(model, "outcome_transform"):
++                if kernel.batch_shape:
++                    samples, _ = model.outcome_transform(samples.transpose(-2, -1))
++                    samples = samples.transpose(-2, -1)
++                else:
++                    samples, _ = model.outcome_transform(samples.unsqueeze(-1))
++                    samples = samples.squeeze(-1)
++
++            samples = istd * samples.view(-1, *samples.shape[len(sample_shape) :])
++            sample_mean = samples.mean(dim=0)
++            sample_covar = (samples - sample_mean).permute(*range(1, samples.ndim), 0)
++            sample_covar = torch.divide(
++                sample_covar @ sample_covar.transpose(-2, -1), sample_shape.numel()
+             )
++            allclose_kwargs = {"atol": slack * sample_shape.numel() ** -0.5}
++            if not is_finite_dimensional(kernel):
++                num_random_features_per_map = config.num_random_features / (
++                    1
++                    if not is_finite_dimensional(kernel, max_depth=0)
++                    else sum(
++                        not is_finite_dimensional(k)
++                        for k in kernel.modules()
++                        if k is not kernel
++                    )
++                )
++                allclose_kwargs["atol"] += slack * num_random_features_per_map**-0.5
++            self.assertTrue(exact_mean.allclose(sample_mean, **allclose_kwargs))
++            self.assertTrue(exact_covar.allclose(sample_covar, **allclose_kwargs))
+
+-        if model.training:
+-            model.eval()
+-            mvn = model(model.transform_inputs(X))
+-            model.train()
+-        else:
+-            mvn = model(model.transform_inputs(X))
+-        exact_moments = (mvn.loc, mvn.covariance_matrix)
+-
+-        # Compare moments
+-        num_features = paths["prior_paths"].weight.shape[-1]
+-        tol = atol * (num_features**-0.5 + sample_shape.numel() ** -0.5)
+-        for exact, estimate in zip(exact_moments, sample_moments):
+-            self.assertTrue(exact.allclose(estimate, atol=tol, rtol=0))
++    def test_model_lists(self, tol: float = 3.0):
++        sample_shape = Size([32, 32])
++        for config, model_list in self.model_lists:
++            with torch.random.fork_rng():
++                torch.random.manual_seed(config.seed)
++                path_list = draw_matheron_paths(
++                    model=model_list,
++                    sample_shape=sample_shape,
++                )
++                self.assertIsInstance(path_list, PathList)
++
++                X = gen_random_inputs(model_list.models[0], batch_shape=[4])
++                sample_list = path_list(X)
++                self.assertIsInstance(sample_list, list)
++                self.assertEqual(len(sample_list), len(model_list.models))
++                for path, sample in zip(path_list, sample_list):
++                    self.assertTrue(path(X).equal(sample))
+diff --git a/fbcode/pytorch/botorch/test/sampling/pathwise/test_prior_samplers.py b/fbcode/pytorch/botorch/test/sampling/pathwise/test_prior_samplers.py
+--- a/fbcode/pytorch/botorch/test/sampling/pathwise/test_prior_samplers.py
++++ b/fbcode/pytorch/botorch/test/sampling/pathwise/test_prior_samplers.py
+@@ -6,175 +6,122 @@
+
+ from __future__ import annotations
+
+-from collections import defaultdict
+-from copy import deepcopy
+-from itertools import product
+-from unittest.mock import MagicMock
++from dataclasses import replace
+
+ import torch
+-from botorch.models import (
+-    FixedNoiseGP,
+-    ModelListGP,
+-    SingleTaskGP,
+-    SingleTaskVariationalGP,
+-)
+-from botorch.models.transforms.input import Normalize
+-from botorch.models.transforms.outcome import Standardize
++from botorch import models
+ from botorch.sampling.pathwise import (
+     draw_kernel_feature_paths,
+     GeneralizedLinearPath,
+     PathList,
+ )
+-from botorch.sampling.pathwise.utils import get_train_inputs
++from botorch.sampling.pathwise.utils import is_finite_dimensional
+ from botorch.utils.testing import BotorchTestCase
+-from gpytorch.kernels import MaternKernel, RBFKernel, ScaleKernel
++from gpytorch.distributions import MultitaskMultivariateNormal
+ from torch import Size
+-from torch.nn.functional import pad
+
+-from .helpers import get_sample_moments, standardize_moments
++from .helpers import gen_module, gen_random_inputs, TestCaseConfig
+
+
+-class TestPriorSamplers(BotorchTestCase):
++class TestDrawKernelFeaturePaths(BotorchTestCase):
+     def setUp(self) -> None:
+         super().setUp()
+-        self.models = defaultdict(list)
+-        self.num_features = 1024
+-
+-        seed = 0
+-        for kernel in (
+-            MaternKernel(nu=2.5, ard_num_dims=2, batch_shape=Size([])),
+-            ScaleKernel(RBFKernel(ard_num_dims=2, batch_shape=Size([2]))),
+-        ):
++        config = TestCaseConfig(seed=0, device=self.device)
++        batch_config = replace(config, batch_shape=Size([2]))
++
++        self.base_models = [
++            (batch_config, gen_module(models.SingleTaskGP, batch_config)),
++            (batch_config, gen_module(models.FixedNoiseGP, batch_config)),
++            (batch_config, gen_module(models.MultiTaskGP, batch_config)),
++            (config, gen_module(models.SingleTaskVariationalGP, config)),
++        ]
++        self.model_lists = [
++            (batch_config, gen_module(models.ModelListGP, batch_config))
++        ]
++
++    def test_base_models(self, slack: float = 3.0):
++        sample_shape = Size([32, 32])
++        for config, model in self.base_models:
++            kernel = (
++                model.model.covar_module
++                if isinstance(model, models.SingleTaskVariationalGP)
++                else model.covar_module
++            )
+             with torch.random.fork_rng():
+-                torch.manual_seed(seed)
+-                tkwargs = {"device": self.device, "dtype": torch.float64}
+-
+-                base = kernel.base_kernel if isinstance(kernel, ScaleKernel) else kernel
+-                base.lengthscale = 0.1 + 0.3 * torch.rand_like(base.lengthscale)
+-                kernel.to(**tkwargs)
++                torch.random.manual_seed(config.seed)
++                paths = draw_kernel_feature_paths(
++                    model=model,
++                    sample_shape=sample_shape,
++                    num_random_features=config.num_random_features,
++                )
++                self.assertIsInstance(paths, GeneralizedLinearPath)
++                n = 16
++                X = gen_random_inputs(model, batch_shape=[n], transformed=False)
++
++            prior = model.forward(X if model.training else model.input_transform(X))
++            if isinstance(prior, MultitaskMultivariateNormal):
++                num_tasks = kernel.batch_shape[0]
++                exact_mean = prior.mean.view(num_tasks, n)
++                exact_covar = prior.covariance_matrix.view(num_tasks, n, num_tasks, n)
++                exact_covar = torch.stack(
++                    [exact_covar[..., i, :, i, :] for i in range(num_tasks)], dim=-3
++                )
++            else:
++                exact_mean = prior.loc
++                exact_covar = prior.covariance_matrix
+
+-                uppers = 1 + 9 * torch.rand(base.lengthscale.shape[-1], **tkwargs)
+-                bounds = pad(uppers.unsqueeze(0), (0, 0, 1, 0))
++            istd = exact_covar.diagonal(dim1=-2, dim2=-1).rsqrt()
++            exact_mean = istd * exact_mean
++            exact_covar = istd.unsqueeze(-1) * exact_covar * istd.unsqueeze(-2)
+
+-                X = uppers * torch.rand(4, base.lengthscale.shape[-1], **tkwargs)
+-                Y = 10 * kernel(X).cholesky() @ torch.randn(4, 1, **tkwargs)
++            samples = paths(X)
++            if hasattr(model, "outcome_transform"):
++                model.outcome_transform.train(mode=False)
+                 if kernel.batch_shape:
+-                    Y = Y.squeeze(-1).transpose(0, 1)  # n x m
+-
+-                input_transform = Normalize(d=X.shape[-1], bounds=bounds)
+-                outcome_transform = Standardize(m=Y.shape[-1])
++                    samples, _ = model.outcome_transform(samples.transpose(-2, -1))
++                    samples = samples.transpose(-2, -1)
++                else:
++                    samples, _ = model.outcome_transform(samples.unsqueeze(-1))
++                    samples = samples.squeeze(-1)
++                model.outcome_transform.train(mode=model.training)
++
++            samples = istd * samples.view(-1, *samples.shape[len(sample_shape) :])
++            sample_mean = samples.mean(dim=0)
++            sample_covar = (samples - sample_mean).permute(*range(1, samples.ndim), 0)
++            sample_covar = torch.divide(
++                sample_covar @ sample_covar.transpose(-2, -1), sample_shape.numel()
++            )
+
+-                # SingleTaskGP in eval mode
+-                self.models[SingleTaskGP].append(
+-                    SingleTaskGP(
+-                        train_X=X,
+-                        train_Y=Y,
+-                        covar_module=deepcopy(kernel),
+-                        input_transform=deepcopy(input_transform),
+-                        outcome_transform=deepcopy(outcome_transform),
+-                    )
+-                    .to(**tkwargs)
+-                    .eval()
++            allclose_kwargs = {"atol": slack * sample_shape.numel() ** -0.5}
++            if not is_finite_dimensional(kernel):
++                num_random_features_per_map = config.num_random_features / (
++                    1
++                    if not is_finite_dimensional(kernel, max_depth=0)
++                    else sum(
++                        not is_finite_dimensional(k)
++                        for k in kernel.modules()
++                        if k is not kernel
+                     )
+-                    .to(**tkwargs)
+-                    .eval()
+                 )
+-
+-                # FixedNoiseGP in train mode
+-                self.models[FixedNoiseGP].append(
+-                    FixedNoiseGP(
+-                        train_X=X,
+-                        train_Y=Y,
+-                        train_Yvar=0.01 * torch.rand_like(Y),
+-                        covar_module=kernel,
+-                        input_transform=input_transform,
+-                        outcome_transform=outcome_transform,
+-                    ).to(**tkwargs)
++    def test_model_lists(self):
++        sample_shape = Size([32, 32])
++        for config, model_list in self.model_lists:
++            with torch.random.fork_rng():
++                torch.random.manual_seed(config.seed)
++                path_list = draw_kernel_feature_paths(
++                    model=model_list,
++                    sample_shape=sample_shape,
++                    num_random_features=config.num_random_features,
+                 )
+-
+-                # SingleTaskVariationalGP in train mode
+-                # When batched, uses a multitask format which break the tests below
+-                if not kernel.batch_shape:
+-                    self.models[SingleTaskVariationalGP].append(
+-                        SingleTaskVariationalGP(
+-                            train_X=X,
+-                            train_Y=Y,
+-                            covar_module=kernel,
+-                            input_transform=input_transform,
+-                            outcome_transform=outcome_transform,
+-                        ).to(**tkwargs)
+-                    )
+-
+-            seed += 1
+-
+-    def test_draw_kernel_feature_paths(self):
+-        for seed, models in enumerate(self.models.values()):
+-            for model, sample_shape in product(models, [Size([1024]), Size([2, 512])]):
+-                with torch.random.fork_rng():
+-                    torch.random.manual_seed(seed)
+-                    paths = draw_kernel_feature_paths(
+-                        model=model,
+-                        sample_shape=sample_shape,
+-                        num_features=self.num_features,
+-                    )
+-                    self.assertIsInstance(paths, GeneralizedLinearPath)
+-                    self._test_draw_kernel_feature_paths(model, paths, sample_shape)
+-
+-        with self.subTest("test_model_list"):
+-            model_list = ModelListGP(
+-                self.models[SingleTaskGP][0], self.models[FixedNoiseGP][0]
+-            )
+-            path_list = draw_kernel_feature_paths(
+-                model=model_list,
+-                sample_shape=sample_shape,
+-                num_features=self.num_features,
+-            )
+-            (train_X,) = get_train_inputs(model_list.models[0], transformed=False)
+-            X = torch.zeros(
+-                4, train_X.shape[-1], dtype=train_X.dtype, device=self.device
+-            )
+-            sample_list = path_list(X)
+-            self.assertIsInstance(path_list, PathList)
+-            self.assertIsInstance(sample_list, list)
+-            self.assertEqual(len(sample_list), len(path_list.paths))
+-
+-        with self.subTest("test_initialization"):
+-            model = self.models[SingleTaskGP][0]
+-            sample_shape = torch.Size([16])
+-            weight_generator = MagicMock()
+-            draw_kernel_feature_paths(
+-                model=model,
+-                sample_shape=sample_shape,
+-                num_features=self.num_features,
+-                weight_generator=weight_generator,
+-            )
+-            weight_generator.assert_called_once_with(
+-                sample_shape + model.covar_module.batch_shape + (self.num_features,)
+-            )
+-
+-    def _test_draw_kernel_feature_paths(self, model, paths, sample_shape, atol=3):
+-        (train_X,) = get_train_inputs(model, transformed=False)
+-        X = torch.rand(16, train_X.shape[-1], dtype=train_X.dtype, device=self.device)
+-
+-        # Evaluate sample paths
+-        samples = paths(X)
+-        batch_shape = (
+-            model.model.covar_module.batch_shape
+-            if isinstance(model, SingleTaskVariationalGP)
+-            else model.covar_module.batch_shape
+-        )
+-        self.assertEqual(samples.shape, sample_shape + batch_shape + X.shape[-2:-1])
+-
+-        # Calculate sample statistics
+-        sample_moments = get_sample_moments(samples, sample_shape)
+-        if hasattr(model, "outcome_transform"):
+-            # Do this instead of untransforming exact moments
+-            sample_moments = standardize_moments(
+-                model.outcome_transform, *sample_moments
+-            )
+-
+-        # Compute prior distribution
+-        prior = model.forward(X if model.training else model.input_transform(X))
+-        exact_moments = (prior.loc, prior.covariance_matrix)
+-
+-        # Compare moments
+-        tol = atol * (paths.weight.shape[-1] ** -0.5 + sample_shape.numel() ** -0.5)
+-        for exact, estimate in zip(exact_moments, sample_moments):
+-            self.assertTrue(exact.allclose(estimate, atol=tol, rtol=0))
++                self.assertIsInstance(path_list, PathList)
++
++                X = gen_random_inputs(model_list.models[0], batch_shape=[4])
++                sample_list = path_list(X)
++                self.assertIsInstance(sample_list, list)
++                self.assertEqual(len(sample_list), len(model_list.models))
++                for path, sample in zip(path_list, sample_list):
++                    self.assertTrue(path(X).equal(sample))
+diff --git a/fbcode/pytorch/botorch/test/sampling/pathwise/test_update_strategies.py b/fbcode/pytorch/botorch/test/sampling/pathwise/test_update_strategies.py
+--- a/fbcode/pytorch/botorch/test/sampling/pathwise/test_update_strategies.py
++++ b/fbcode/pytorch/botorch/test/sampling/pathwise/test_update_strategies.py
+@@ -6,15 +6,11 @@
+
+ from __future__ import annotations
+
+-from collections import defaultdict
+-from copy import deepcopy
+-from itertools import chain
++from dataclasses import replace
+ from unittest.mock import patch
+
+ import torch
+-from botorch.models import FixedNoiseGP, SingleTaskGP, SingleTaskVariationalGP
+-from botorch.models.transforms.input import Normalize
+-from botorch.models.transforms.outcome import Standardize
++from botorch import models
+ from botorch.sampling.pathwise import (
+     draw_kernel_feature_paths,
+     gaussian_update,
+@@ -24,114 +20,55 @@
+ from botorch.sampling.pathwise.utils import get_train_inputs, get_train_targets
+ from botorch.utils.context_managers import delattr_ctx
+ from botorch.utils.testing import BotorchTestCase
+-from gpytorch.kernels import MaternKernel, RBFKernel, ScaleKernel
+ from gpytorch.likelihoods import BernoulliLikelihood
+ from gpytorch.utils.cholesky import psd_safe_cholesky
+ from linear_operator.operators import ZeroLinearOperator
+ from torch import Size
+-from torch.nn.functional import pad
+
++from .helpers import gen_module, gen_random_inputs, TestCaseConfig
+
+-class TestPathwiseUpdates(BotorchTestCase):
++
++class TestGaussianUpdates(BotorchTestCase):
+     def setUp(self) -> None:
+         super().setUp()
+-        self.models = defaultdict(list)
+-
+-        seed = 0
+-        for kernel in (
+-            RBFKernel(ard_num_dims=2),
+-            ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=2, batch_shape=Size([2]))),
+-        ):
+-            with torch.random.fork_rng():
+-                torch.manual_seed(seed)
+-                tkwargs = {"device": self.device, "dtype": torch.float64}
+-
+-                base = kernel.base_kernel if isinstance(kernel, ScaleKernel) else kernel
+-                base.lengthscale = 0.1 + 0.3 * torch.rand_like(base.lengthscale)
+-                kernel.to(**tkwargs)
+-
+-                uppers = 1 + 9 * torch.rand(base.lengthscale.shape[-1], **tkwargs)
+-                bounds = pad(uppers.unsqueeze(0), (0, 0, 1, 0))
+-
+-                X = uppers * torch.rand(4, base.lengthscale.shape[-1], **tkwargs)
+-                Y = 10 * kernel(X).cholesky() @ torch.randn(4, 1, **tkwargs)
+-                if kernel.batch_shape:
+-                    Y = Y.squeeze(-1).transpose(0, 1)  # n x m
+-
+-                input_transform = Normalize(d=X.shape[-1], bounds=bounds)
+-                outcome_transform = Standardize(m=Y.shape[-1])
+-
+-                # SingleTaskGP in eval mode
+-                self.models[SingleTaskGP].append(
+-                    SingleTaskGP(
+-                        train_X=X,
+-                        train_Y=Y,
+-                        covar_module=deepcopy(kernel),
+-                        input_transform=deepcopy(input_transform),
+-                        outcome_transform=deepcopy(outcome_transform),
+-                    )
+-                    .to(**tkwargs)
+-                    .eval()
++        config = TestCaseConfig(seed=0, device=self.device)
++        batch_config = replace(config, batch_shape=Size([2]))
++
++        self.base_models = [
++            (batch_config, gen_module(models.SingleTaskGP, batch_config)),
++            (batch_config, gen_module(models.FixedNoiseGP, batch_config)),
++            (batch_config, gen_module(models.MultiTaskGP, batch_config)),
++            (config, gen_module(models.SingleTaskVariationalGP, config)),
++        ]
++        self.model_lists = [
++            (batch_config, gen_module(models.ModelListGP, batch_config))
++        ]
++
++    def test_base_models(self):
++        sample_shape = torch.Size([3])
++        for config, model in self.base_models:
++            tkwargs = {"device": config.device, "dtype": config.dtype}
++            if isinstance(model, models.SingleTaskVariationalGP):
++                Z = model.model.variational_strategy.inducing_points
++                X = (
++                    model.input_transform.untransform(Z)
++                    if hasattr(model, "input_transform")
++                    else Z
+                 )
+-
+-                # FixedNoiseGP in train mode
+-                self.models[FixedNoiseGP].append(
+-                    FixedNoiseGP(
+-                        train_X=X,
+-                        train_Y=Y,
+-                        train_Yvar=0.01 * torch.rand_like(Y),
+-                        covar_module=kernel,
+-                        input_transform=input_transform,
+-                        outcome_transform=outcome_transform,
+-                    ).to(**tkwargs)
++                target_values = torch.randn(len(Z), **tkwargs)
++                noise_values = None
++                Kuu = Kmm = model.model.covar_module(Z)
++            else:
++                (X,) = get_train_inputs(model, transformed=False)
++                (Z,) = get_train_inputs(model, transformed=True)
++                target_values = get_train_targets(model, transformed=True)
++                noise_values = torch.randn(
++                    *sample_shape, *target_values.shape, **tkwargs
+                 )
++                Kmm = model.forward(X if model.training else Z).lazy_covariance_matrix
++                Kuu = Kmm + model.likelihood.noise_covar(shape=Z.shape[:-1])
+
+-                # SingleTaskVariationalGP in train mode
+-                # When batched, uses a multitask format which break the tests below
+-                if not kernel.batch_shape:
+-                    self.models[SingleTaskVariationalGP].append(
+-                        SingleTaskVariationalGP(
+-                            train_X=X,
+-                            train_Y=Y,
+-                            covar_module=kernel,
+-                            input_transform=input_transform,
+-                            outcome_transform=outcome_transform,
+-                        ).to(**tkwargs)
+-                    )
+-
+-            seed += 1
+-
+-    def test_gaussian_updates(self):
+-        for seed, model in enumerate(chain.from_iterable(self.models.values())):
+-            with torch.random.fork_rng():
+-                torch.manual_seed(seed)
+-                self._test_gaussian_updates(model)
+-
+-    def _test_gaussian_updates(self, model):
+-        sample_shape = torch.Size([3])
+-
+-        # Extract exact conditions and precompute covariances
+-        if isinstance(model, SingleTaskVariationalGP):
+-            Z = model.model.variational_strategy.inducing_points
+-            X = (
+-                Z
+-                if model.input_transform is None
+-                else model.input_transform.untransform(Z)
+-            )
+-            U = torch.randn(len(Z), device=Z.device, dtype=Z.dtype)
+-            Kuu = Kmm = model.model.covar_module(Z)
+-            noise_values = None
+-        else:
+-            (X,) = get_train_inputs(model, transformed=False)
+-            (Z,) = get_train_inputs(model, transformed=True)
+-            U = get_train_targets(model, transformed=True)
+-            Kmm = model.forward(X if model.training else Z).lazy_covariance_matrix
+-            Kuu = Kmm + model.likelihood.noise_covar(shape=Z.shape[:-1])
+-            noise_values = torch.randn(
+-                *sample_shape, *U.shape, device=U.device, dtype=U.dtype
+-            )
+-
+-        # Disable sampling of noise variables `e` used to obtain `y = f + e`
++        # Fix noise values used to generate `y = f + e`
+         with delattr_ctx(model, "outcome_transform"), patch.object(
+             torch,
+             "randn_like",
+@@ -142,7 @@
+             update_paths = gaussian_update(
+                 model=model,
+                 sample_values=sample_values,
+-                target_values=U,
++                target_values=target_values,
+             )
+
+         # Test initialization
+@@ -156,7 @@
+
+         # Compare with manually computed update weights `Cov(y, y)^{-1} (y - f - e)`
+         Luu = psd_safe_cholesky(Kuu.to_dense())
+-        errors = U - sample_values
++        errors = target_values - sample_values
+         if noise_values is not None:
+             errors -= (
+                 model.likelihood.noise_covar(shape=Z.shape[:-1]).cholesky()
+@@ -166,7 @@
+         self.assertTrue(weight.allclose(update_paths.weight))
+
+         # Compare with manually computed update values at test locations
+-        Z2 = torch.rand(16, Z.shape[-1], device=self.device, dtype=Z.dtype)
++        Z2 = gen_random_inputs(model, batch_shape=[16], transformed=True)
+         X2 = (
+             model.input_transform.untransform(Z2)
+             if hasattr(model, "input_transform")
+@@ -182,15 +119,15 @@
+         update_paths = gaussian_update(
+             model=model,
+             sample_values=sample_values,
+-            target_values=U,
++            target_values=target_values,
+             noise_covariance=ZeroLinearOperator(m, m, dtype=X.dtype),
+         )
+         Lmm = psd_safe_cholesky(Kmm.to_dense())
+-        errors = U - sample_values
++        errors = target_values - sample_values
+         weight = torch.cholesky_solve(errors.unsqueeze(-1), Lmm).squeeze(-1)
+         self.assertTrue(weight.allclose(update_paths.weight))
+
+-        if isinstance(model, SingleTaskVariationalGP):
++        if isinstance(model, models.SingleTaskVariationalGP):
+             # Test passing non-zero `noise_covariance``
+             with patch.object(model, "likelihood", new=BernoulliLikelihood()):
+                 with self.assertRaisesRegex(NotImplementedError, "not yet supported"):
+diff --git a/fbcode/pytorch/botorch/test/sampling/pathwise/test_utils.py b/fbcode/pytorch/botorch/test/sampling/pathwise/test_utils.py
+--- a/fbcode/pytorch/botorch/test/sampling/pathwise/test_utils.py
++++ b/fbcode/pytorch/botorch/test/sampling/pathwise/test_utils.py
+@@ -18,6 +18,8 @@
+     get_output_transform,
+     get_train_inputs,
+     get_train_targets,
++)
++from botorch.sampling.pathwise.utils.transforms import (
+     InverseLengthscaleTransform,
+     OutcomeUntransformer,
+ )

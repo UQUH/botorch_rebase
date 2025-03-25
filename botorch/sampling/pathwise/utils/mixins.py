@@ -7,26 +7,14 @@
 from __future__ import annotations
 
 from abc import ABC
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    Iterable,
-    Iterator,
-    Mapping,
-    Optional,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Generic, Iterable, Iterator, Optional, TypeVar, Union
 
 from botorch.models.transforms.input import InputTransform
 from botorch.models.transforms.outcome import OutcomeTransform
-from botorch.utils.types import cast
 from torch import Tensor
-from torch.nn import Module, ModuleDict, ModuleList
+from torch.nn import Module, ModuleList
 
-T = TypeVar("T")
+T = TypeVar("T")  # generic type variable
 TModule = TypeVar("TModule", bound=Module)
 TInputTransform = Union[InputTransform, Callable[[Tensor], Tensor]]
 TOutputTransform = Union[OutcomeTransform, Callable[[Tensor], Tensor]]
@@ -58,47 +46,10 @@ class TransformedModuleMixin:
         )
 
 
-class ModuleDictMixin(ABC, Generic[TModule]):
-    def __init__(self, attr_name: str, modules: Optional[Mapping[str, TModule]] = None):
-        self.__module_dict_name = attr_name
-        self.register_module(self.__module_dict_name, cast(ModuleDict, modules))
-
-    @property
-    def __module_dict(self) -> ModuleDict:
-        return getattr(self, self.__module_dict_name)
-
-    def items(self) -> Iterable[Tuple[str, TModule]]:
-        return self.__module_dict.items()
-
-    def keys(self) -> Iterable[str]:
-        return self.__module_dict.keys()
-
-    def values(self) -> Iterable[TModule]:
-        return self.__module_dict.values()
-
-    def update(self, modules: Mapping[str, TModule]) -> None:
-        self.__module_dict.update(modules)
-
-    def __len__(self) -> int:
-        return len(self.__module_dict)
-
-    def __iter__(self) -> Iterator[str]:
-        yield from self.__module_dict
-
-    def __delitem__(self, key: str) -> None:
-        del self.__module_dict[key]
-
-    def __getitem__(self, key: str) -> TModule:
-        return self.__module_dict[key]
-
-    def __setitem__(self, key: str, val: TModule) -> None:
-        self.__module_dict[key] = val
-
-
 class ModuleListMixin(ABC, Generic[TModule]):
     def __init__(self, attr_name: str, modules: Optional[Iterable[TModule]] = None):
         self.__module_list_name = attr_name
-        self.register_module(self.__module_list_name, cast(ModuleList, modules))
+        self.register_module(self.__module_list_name, ModuleList([] if modules is None else modules))
 
     @property
     def __module_list(self) -> ModuleList:
@@ -117,4 +68,4 @@ class ModuleListMixin(ABC, Generic[TModule]):
         return self.__module_list[key]
 
     def __setitem__(self, key: int, val: TModule) -> None:
-        self.__module_list[key] = val
+        self.__module_list[key] = val 
