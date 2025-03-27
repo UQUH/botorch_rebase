@@ -49,7 +49,7 @@ class ConstantMulTransform(TensorTransform):
         r"""Initializes a ConstantMulTransform instance.
 
         Args:
-            scale: Multiplicative constant.
+            constant: Multiplicative constant.
         """
         super().__init__()
         self.register_buffer("constant", torch.as_tensor(constant))
@@ -66,24 +66,29 @@ class CosineTransform(TensorTransform):
 
 
 class SineCosineTransform(TensorTransform):
-    r"""A transform that returns concatenated sine and cosine features."""
+    r"""A transform that returns concatenated sine and cosine features.
+    
+    This transform concatenates the sine and cosine of its inputs along the last dimension.
+    Optionally scales the output by a constant factor.
 
-    def __init__(self, constant: Optional[Tensor] = None):
-        r"""Initializes a SineCosineTransform instance.
+    Args:
+        scale: Optional scale factor to multiply the output by.
+    """
 
-        Args:
-            constant: An optional tensor used to rescale the module's outputs.
-        """
+    def __init__(self, scale: Optional[Tensor] = None):
         super().__init__()
-        self.register_buffer("constant", constant)
+        if scale is not None:
+            self.register_buffer("scale", torch.as_tensor(scale))
+        else:
+            self.scale = None
 
     def forward(self, values: Tensor) -> Tensor:
-        sincos = torch.concat([values.sin(), values.cos()], dim=-1)
-        return sincos if self.constant is None else self.constant * sincos
+        output = torch.concat([values.sin(), values.cos()], dim=-1)
+        return output if self.scale is None else self.scale * output
 
 
 class InverseLengthscaleTransform(TensorTransform):
-    r"""A transform that divides its inputs by a kernels lengthscales."""
+    r"""A transform that divides its inputs by a kernel's lengthscales."""
 
     def __init__(self, kernel: ScaleKernel):
         r"""Initializes an InverseLengthscaleTransform instance.
@@ -124,7 +129,7 @@ class OutputscaleTransform(TensorTransform):
 
 
 class FeatureSelector(TensorTransform):
-    r"""A transform that returns a subset of its input's features.
+    r"""A transform that returns a subset of its input's features
     along a given tensor dimension."""
 
     def __init__(self, indices: Iterable[int], dim: Union[int, LongTensor] = -1):

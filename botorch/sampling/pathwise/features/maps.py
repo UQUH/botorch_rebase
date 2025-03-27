@@ -30,7 +30,8 @@ from linear_operator.operators import (
     LinearOperator,
 )
 from torch import Size, Tensor
-from torch.nn import Module
+from torch.nn import Module, ModuleList
+from torch.utils.data import TensorDataset
 
 
 class FeatureMap(TransformedModuleMixin, Module):
@@ -58,9 +59,14 @@ class FeatureMap(TransformedModuleMixin, Module):
         )
 
 
-class FeatureMapList(Module, ModuleListMixin[FeatureMap]):
+class FeatureMapList(ModuleListMixin[FeatureMap]):
+    """A list of feature maps.
+    
+    This class provides list-like access to a collection of feature maps while ensuring
+    proper PyTorch module registration and parameter tracking.
+    """
+
     def __init__(self, feature_maps: Iterable[FeatureMap]):
-        Module.__init__(self)
         ModuleListMixin.__init__(self, attr_name="feature_maps", modules=feature_maps)
 
     def forward(self, x: Tensor, **kwargs: Any) -> List[Union[Tensor, LinearOperator]]:
@@ -85,7 +91,7 @@ class FeatureMapList(Module, ModuleListMixin[FeatureMap]):
         return next(iter(dtypes)) if dtypes else None
 
 
-class DirectSumFeatureMap(FeatureMap, FeatureMapList):
+class DirectSumFeatureMap(FeatureMap):
     r"""Direct sums of features."""
 
     def __init__(
@@ -94,8 +100,8 @@ class DirectSumFeatureMap(FeatureMap, FeatureMapList):
         input_transform: Optional[TInputTransform] = None,
         output_transform: Optional[TOutputTransform] = None,
     ):
-        FeatureMap.__init__(self)
-        FeatureMapList.__init__(self, feature_maps=feature_maps)
+        super().__init__()
+        self._feature_maps = ModuleList([] if feature_maps is None else feature_maps)
         self.input_transform = input_transform
         self.output_transform = output_transform
 
@@ -103,7 +109,7 @@ class DirectSumFeatureMap(FeatureMap, FeatureMapList):
         blocks = []
         shape = self.raw_output_shape
         ndim = len(shape)
-        for feature_map in self:
+        for feature_map in self._feature_maps:
             block = feature_map(x, **kwargs).to_dense()
             block_ndim = len(feature_map.output_shape)
             if block_ndim < ndim:
@@ -126,7 +132,7 @@ class DirectSumFeatureMap(FeatureMap, FeatureMapList):
 
     @property
     def raw_output_shape(self) -> Size:
-        map_iter = iter(self)
+        map_iter = iter(self._feature_maps)
         feature_map = next(map_iter)
         concat_size = feature_map.output_shape[-1]
         batch_shape = feature_map.output_shape[:-1]
@@ -139,7 +145,7 @@ class DirectSumFeatureMap(FeatureMap, FeatureMapList):
 
     @property
     def batch_shape(self) -> Size:
-        batch_shapes = {feature_map.batch_shape for feature_map in self}
+        batch_shapes = {feature_map.batch_shape for feature_map in self._feature_maps}
         if len(batch_shapes) > 1:
             raise ValueError(
                 f"Component maps have the same batch shapes, but {batch_shapes=}."
@@ -147,7 +153,7 @@ class DirectSumFeatureMap(FeatureMap, FeatureMapList):
         return next(iter(batch_shapes))
 
 
-class OuterProductFeatureMap(FeatureMap, FeatureMapList):
+class OuterProductFeatureMap(FeatureMap):
     r"""Outer product of vector-valued features."""
 
     def __init__(
@@ -156,18 +162,18 @@ class OuterProductFeatureMap(FeatureMap, FeatureMapList):
         input_transform: Optional[TInputTransform] = None,
         output_transform: Optional[TOutputTransform] = None,
     ):
-        FeatureMap.__init__(self)
-        FeatureMapList.__init__(self, feature_maps=feature_maps)
+        super().__init__()
+        self._feature_maps = ModuleList([] if feature_maps is None else feature_maps)
         self.input_transform = input_transform
         self.output_transform = output_transform
 
     def forward(self, x: Tensor, **kwargs: Any) -> Tensor:
-        num_maps = len(self)
+        num_maps = len(self._feature_maps)
         lhs = (f"...{ascii_letters[i]}" for i in range(num_maps))
         rhs = f"...{ascii_letters[:num_maps]}"
         eqn = f"{','.join(lhs)}->{rhs}"
 
-        outputs_iter = (feature_map(x, **kwargs).to_dense() for feature_map in self)
+        outputs_iter = (feature_map(x, **kwargs).to_dense() for feature_map in self._feature_maps)
         output = torch.einsum(eqn, *outputs_iter)
         return output.view(*output.shape[:-num_maps], -1)
 
@@ -175,7 +181,7 @@ class OuterProductFeatureMap(FeatureMap, FeatureMapList):
     def raw_output_shape(self) -> Size:
         outer_size = 1
         batch_shapes = []
-        for feature_map in self:
+        for feature_map in self._feature_maps:
             *batch_shape, size = feature_map.output_shape
             outer_size *= size
             batch_shapes.append(batch_shape)
@@ -183,7 +189,7 @@ class OuterProductFeatureMap(FeatureMap, FeatureMapList):
 
     @property
     def batch_shape(self) -> Size:
-        batch_shapes = (feature_map.batch_shape for feature_map in self)
+        batch_shapes = (feature_map.batch_shape for feature_map in self._feature_maps)
         return torch.broadcast_shapes(*batch_shapes)
 
 

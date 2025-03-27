@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from botorch.sampling.pathwise.utils.helpers import (
+    append_transform,
     get_input_transform,
     get_kernel_num_inputs,
     get_output_transform,
@@ -12,9 +13,12 @@ from botorch.sampling.pathwise.utils.helpers import (
     get_train_targets,
     is_finite_dimensional,
     kernel_instancecheck,
+    prepend_transform,
+    sparse_block_diag,
     untransform_shape,
 )
 from botorch.sampling.pathwise.utils.mixins import (
+    ModuleDictMixin,
     ModuleListMixin,
     TInputTransform,
     TOutputTransform,
@@ -33,6 +37,7 @@ from botorch.sampling.pathwise.utils.transforms import (
 )
 
 __all__ = [
+    "append_transform",
     "ChainedTransform",
     "ConstantMulTransform",
     "CosineTransform",
@@ -45,9 +50,12 @@ __all__ = [
     "is_finite_dimensional",
     "kernel_instancecheck",
     "InverseLengthscaleTransform",
+    "ModuleDictMixin",
     "ModuleListMixin",
     "OutputscaleTransform",
+    "prepend_transform",
     "SineCosineTransform",
+    "sparse_block_diag",
     "TensorTransform",
     "TInputTransform",
     "TOutputTransform",

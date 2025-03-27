@@ -6,7 +6,19 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, overload, Tuple, Type, Union
+from sys import maxsize
+from typing import (
+    Callable,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    overload,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
 import torch
 from botorch.models.approximate_gp import SingleTaskVariationalGP
@@ -14,44 +26,179 @@ from botorch.models.gpytorch import GPyTorchModel
 from botorch.models.model import Model, ModelList
 from botorch.models.transforms.input import InputTransform
 from botorch.models.transforms.outcome import OutcomeTransform
-from botorch.sampling.pathwise.utils.transforms import OutcomeUntransformer
+from botorch.sampling.pathwise.utils.mixins import TransformedModuleMixin
+from botorch.sampling.pathwise.utils.transforms import (
+    ChainedTransform,
+    OutcomeUntransformer,
+    TensorTransform,
+)
 from botorch.utils.dispatcher import Dispatcher
 from botorch.utils.types import MISSING
-from gpytorch.kernels import Kernel, RBFKernel, ScaleKernel
+from gpytorch import kernels
+from gpytorch.kernels.kernel import Kernel
+from linear_operator import LinearOperator
 from torch import Size, Tensor
 
+TKernel = TypeVar("TKernel", bound=Kernel)
 GetTrainInputs = Dispatcher("get_train_inputs")
 GetTrainTargets = Dispatcher("get_train_targets")
+INF_DIM_KERNELS: Tuple[Type[Kernel], ...] = (kernels.MaternKernel, kernels.RBFKernel)
 
 
-def kernel_instancecheck(kernel: Kernel, kernel_type: Type[Kernel]) -> bool:
-    """Check if a kernel is an instance of a kernel type, ignoring ScaleKernel wrappers."""
-    if isinstance(kernel, kernel_type):
-        return True
-    if isinstance(kernel, ScaleKernel):
-        return kernel_instancecheck(kernel.base_kernel, kernel_type)
-    return False
-
-
-def is_finite_dimensional(kernel: Kernel, max_depth: int = -1) -> bool:
-    """Check if a kernel has a finite-dimensional feature map.
-
+def kernel_instancecheck(
+    kernel: Kernel,
+    types: Union[TKernel, Tuple[TKernel, ...]],
+    reducer: Callable[[Iterator[bool]], bool] = any,
+    max_depth: int = maxsize,
+) -> bool:
+    """Check if a kernel is an instance of specified kernel type(s).
+    
     Args:
-        kernel: The kernel to check.
-        max_depth: The maximum depth to search for finite-dimensional kernels.
-            If -1, search all the way down. If 0, only check the top level.
-
+        kernel: The kernel to check
+        types: Single kernel type or tuple of kernel types to check against
+        reducer: Function to reduce multiple boolean checks (default: any)
+        max_depth: Maximum depth to search in kernel hierarchy
+        
     Returns:
-        True if the kernel has a finite-dimensional feature map, False otherwise.
+        bool: Whether kernel matches the specified type(s)
     """
-    # TODO: Add support for more kernels
-    if max_depth == 0:
-        return not kernel_instancecheck(kernel, RBFKernel)
+    if isinstance(kernel, types):
+        return True
+
+    if max_depth == 0 or not isinstance(kernel, Kernel):
+        return False
+
+    return reducer(
+        kernel_instancecheck(module, types, reducer, max_depth - 1)
+        for module in kernel.modules()
+        if module is not kernel and isinstance(module, Kernel)
+    )
+
+
+def is_finite_dimensional(kernel: Kernel, max_depth: int = maxsize) -> bool:
+    """Check if a kernel has a finite-dimensional feature map.
     
-    if isinstance(kernel, ScaleKernel):
-        return is_finite_dimensional(kernel.base_kernel, max_depth=max_depth-1 if max_depth > 0 else -1)
+    Args:
+        kernel: The kernel to check
+        max_depth: Maximum depth to search in kernel hierarchy
+        
+    Returns:
+        bool: Whether kernel has finite-dimensional feature map
+    """
+    return not kernel_instancecheck(
+        kernel, types=INF_DIM_KERNELS, reducer=any, max_depth=max_depth
+    )
+
+
+def sparse_block_diag(
+    blocks: Iterable[Tensor],
+    base_ndim: int = 2,
+) -> Tensor:
+    """Creates a sparse block diagonal tensor from a list of tensors.
     
-    return not kernel_instancecheck(kernel, RBFKernel)
+    Args:
+        blocks: Iterable of tensors to arrange diagonally
+        base_ndim: Number of dimensions to treat as matrix dimensions
+        
+    Returns:
+        Tensor: Sparse block diagonal tensor
+    """
+    device = next(iter(blocks)).device
+    values = []
+    indices = []
+    shape = torch.zeros(base_ndim, 1, dtype=torch.long, device=device)
+    batch_shapes = []
+    
+    for blk in blocks:
+        batch_shapes.append(blk.shape[:-base_ndim])
+        if isinstance(blk, LinearOperator):
+            blk = blk.to_dense()
+
+        _blk = (blk if blk.is_sparse else blk.to_sparse()).coalesce()
+        values.append(_blk.values())
+
+        idx = _blk.indices()
+        idx[-base_ndim:, :] += shape
+        indices.append(idx)
+        for i, size in enumerate(blk.shape[-base_ndim:]):
+            shape[i] += size
+
+    return torch.sparse_coo_tensor(
+        indices=torch.concat(indices, dim=-1),
+        values=torch.concat(values),
+        size=Size((*torch.broadcast_shapes(*batch_shapes), *shape.squeeze(-1))),
+    )
+
+
+def append_transform(
+    module: TransformedModuleMixin,
+    attr_name: str,
+    transform: Union[InputTransform, OutcomeTransform, TensorTransform],
+) -> None:
+    """Appends a transform to a module's transform chain.
+    
+    Args:
+        module: Module to append transform to
+        attr_name: Name of transform attribute
+        transform: Transform to append
+    """
+    other = getattr(module, attr_name, None)
+    if other is None:
+        setattr(module, attr_name, transform)
+    else:
+        setattr(module, attr_name, ChainedTransform(other, transform))
+
+
+def prepend_transform(
+    module: TransformedModuleMixin,
+    attr_name: str,
+    transform: Union[InputTransform, OutcomeTransform, TensorTransform],
+) -> None:
+    """Prepends a transform to a module's transform chain.
+    
+    Args:
+        module: Module to prepend transform to
+        attr_name: Name of transform attribute
+        transform: Transform to prepend
+    """
+    other = getattr(module, attr_name, None)
+    if other is None:
+        setattr(module, attr_name, transform)
+    else:
+        setattr(module, attr_name, ChainedTransform(transform, other))
+
+
+def untransform_shape(
+    transform: Union[TensorTransform, InputTransform, OutcomeTransform],
+    shape: Size,
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = None,
+) -> Size:
+    """Gets the shape after applying an inverse transform.
+    
+    Args:
+        transform: Transform to invert
+        shape: Input shape
+        device: Optional device for test tensor
+        dtype: Optional dtype for test tensor
+        
+    Returns:
+        Size: Shape after inverse transform
+    """
+    if transform is None:
+        return shape
+
+    test_case = torch.empty(shape, device=device, dtype=dtype)
+    if isinstance(transform, OutcomeTransform):
+        if not getattr(transform, "_is_trained", True):
+            return shape
+        result, _ = transform.untransform(test_case)
+    elif isinstance(transform, InputTransform):
+        result = transform.untransform(test_case)
+    else:
+        result = transform(test_case)
+
+    return result.shape[-test_case.ndim:]
 
 
 def get_kernel_num_inputs(
@@ -190,25 +337,4 @@ def _get_train_targets_SingleTaskVariationalGP(
 def _get_train_targets_ModelList(
     model: ModelList, transformed: bool = False
 ) -> List[...]:
-    return [get_train_targets(m, transformed=transformed) for m in model.models]
-
-
-def untransform_shape(
-    transform: Union[InputTransform, OutcomeTransform],
-    shape: Size,
-    device: Optional[torch.device] = None,
-    dtype: Optional[torch.dtype] = None,
-) -> Size:
-    if transform is None:
-        return shape
-
-    test_case = torch.empty(shape, device=device, dtype=dtype)
-    if isinstance(transform, OutcomeTransform):
-        result, _ = transform.untransform(test_case)
-    elif isinstance(transform, InputTransform):
-        result = transform.untransform(test_case)
-    else:
-        result = transform(test_case)
-
-    # TODO: This function assumes that dimensionality remains unchanged
-    return result.shape[-test_case.ndim :] 
+    return [get_train_targets(m, transformed=transformed) for m in model.models] 

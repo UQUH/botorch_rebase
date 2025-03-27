@@ -6,10 +6,32 @@
 
 from __future__ import annotations
 
+from typing import Any, Type, TypeVar
+
+T = TypeVar("T")  # generic type variable
+NoneType = type(None)  # stop gap for the return of NoneType in 3.10
+
+
+def cast(typ: Type[T], obj: Any, optional: bool = False) -> T:
+    """Cast an object to a type, optionally allowing None.
+    
+    Args:
+        typ: Type to cast to
+        obj: Object to cast
+        optional: Whether to allow None
+        
+    Returns:
+        Cast object
+    """
+    if (optional and obj is None) or isinstance(obj, typ):
+        return obj
+
+    return typ(obj)
+
 
 class _DefaultType(type):
     r"""
-    Private class whose sole instance `DEFAULT` is as a special indicator
+    Private class whose sole instance `DEFAULT` is a special indicator
     representing that a default value should be assigned to an argument.
     Typically used in cases where `None` is an allowed argument.
     """
