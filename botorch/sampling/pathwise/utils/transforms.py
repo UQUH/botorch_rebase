@@ -66,31 +66,21 @@ class CosineTransform(TensorTransform):
 
 
 class SineCosineTransform(TensorTransform):
-    r"""A transform that returns concatenated sine and cosine features.
-    
-    This transform concatenates the sine and cosine of its inputs along the last dimension.
-    Optionally scales the output by a constant factor.
-
-    Args:
-        scale: Optional scale factor to multiply the output by.
-    """
+    r"""A transform that returns concatenated sine and cosine features."""
 
     def __init__(self, scale: Optional[Tensor] = None):
         super().__init__()
-        if scale is not None:
-            self.register_buffer("scale", torch.as_tensor(scale))
-        else:
-            self.scale = None
+        self.register_buffer("scale", torch.as_tensor(scale) if scale is not None else None)
 
     def forward(self, values: Tensor) -> Tensor:
-        output = torch.concat([values.sin(), values.cos()], dim=-1)
-        return output if self.scale is None else self.scale * output
+        sincos = torch.concat([values.sin(), values.cos()], dim=-1)
+        return sincos if self.scale is None else self.scale * sincos
 
 
 class InverseLengthscaleTransform(TensorTransform):
     r"""A transform that divides its inputs by a kernel's lengthscales."""
 
-    def __init__(self, kernel: ScaleKernel):
+    def __init__(self, kernel: Kernel):
         r"""Initializes an InverseLengthscaleTransform instance.
 
         Args:

@@ -91,7 +91,7 @@ class PathList(SamplePath):
     def __init__(
         self,
         paths: Iterable[SamplePath] | None = None,
-        join: Callable[[list[Tensor]], Tensor] | None = None,
+        reducer: Callable[[list[Tensor]], Tensor] | None = None,
         input_transform: TInputTransform | None = None,
         output_transform: TOutputTransform | None = None,
     ) -> None:
@@ -99,27 +99,27 @@ class PathList(SamplePath):
 
         Args:
             paths: An optional iterable of sample paths.
-            join: An optional callable used to combine each path's outputs.
+            reducer: An optional callable used to combine each path's outputs.
             input_transform: An optional input transform for the module.
             output_transform: An optional output transform for the module.
         """
 
-        if join is None and output_transform is not None:
-            raise UnsupportedError("Output transforms must be preceded by a join rule.")
+        if reducer is None and output_transform is not None:
+            raise UnsupportedError("`output_transform` must be preceded by a `reducer`.")
 
         super().__init__()
-        self.join = join
+        self.reducer = reducer
         self.input_transform = input_transform
         self.output_transform = output_transform
         self.paths = (
             paths
             if isinstance(paths, ModuleList)
-            else ModuleList({} if paths is None else paths)
+            else ModuleList([] if paths is None else paths)
         )
 
     def forward(self, x: Tensor, **kwargs: Any) -> Tensor | list[Tensor]:
         out = [path(x, **kwargs) for path in self.paths]
-        return out if self.join is None else self.join(out)
+        return out if self.reducer is None else self.reducer(out)
 
     def __len__(self) -> int:
         return len(self.paths)

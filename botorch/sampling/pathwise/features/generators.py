@@ -16,13 +16,14 @@ r"""
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, Optional
+from math import pi
+from typing import Any, Callable, Iterable, Optional
 
 import torch
 from botorch.exceptions.errors import UnsupportedError
 from botorch.sampling.pathwise.features.maps import (
     DirectSumFeatureMap,
+    FeatureMap,
     FourierFeatureMap,
     IndexKernelFeatureMap,
     KernelFeatureMap,
@@ -31,20 +32,26 @@ from botorch.sampling.pathwise.features.maps import (
     OuterProductFeatureMap,
 )
 from botorch.sampling.pathwise.utils import (
-    ChainedTransform,
-    FeatureSelector,
-    InverseLengthscaleTransform,
-    OutputscaleTransform,
-    SineCosineTransform,
+    append_transform,
     get_kernel_num_inputs,
+    is_finite_dimensional,
+    prepend_transform,
+    transforms,
 )
 from botorch.utils.dispatcher import Dispatcher
 from botorch.utils.sampling import draw_sobol_normal_samples
+from botorch.utils.types import DEFAULT
 from gpytorch import kernels
 from torch import Size, Tensor
 from torch.distributions import Gamma
 
+# IMPLEMENTATION NOTE: This type definition specifies the interface for feature map generators.
+# It defines a callable that takes a kernel and dimension parameters and returns a KernelFeatureMap.
 TKernelFeatureMapGenerator = Callable[[kernels.Kernel, int, int], KernelFeatureMap]
+
+# IMPLEMENTATION NOTE: We use a Dispatcher pattern to register different handlers for various
+# kernel types. This allows for extensibility - new kernel types can be supported by adding
+# new handler functions registered to this dispatcher.
 GenKernelFeatureMap = Dispatcher("gen_kernel_feature_map")
 
 def gen_kernel_feature_map(
@@ -67,6 +74,11 @@ def gen_kernel_feature_map(
             and :code:`ard_num_dims` attributes are both None.
         **kwargs: Additional keyword arguments are passed to subroutines.
     """
+    # IMPLEMENTATION NOTE: This function serves as the main entry point for generating
+    # feature maps from kernels. It uses the dispatcher to call the appropriate handler
+    # based on the kernel type. The function has been updated from the original implementation
+    # to use more descriptive parameter names (num_ambient_inputs instead of num_inputs,
+    # and num_random_features instead of num_outputs) to better reflect their purpose.
     return GenKernelFeatureMap(
         kernel,
         num_ambient_inputs=num_ambient_inputs,
@@ -101,43 +113,59 @@ def _gen_fourier_features(
         cosine_only: Specifies whether or not to use cosine features with a random
             phase instead of paired sine and cosine features.
     """
+    # IMPLEMENTATION NOTE: This function implements the random Fourier features method from
+    # to approximate stationary kernels. It has been enhanced from
+    # the original implementation to support the cosine_only option, which is critical for
+    # the ProductKernel implementation where we need to avoid the tensor product of sine and
+    # cosine features.
+    
     if not cosine_only and num_random_features % 2:
         raise UnsupportedError(
             f"Expected an even number of random features, but {num_random_features=}."
         )
 
+    # Get the appropriate number of inputs based on kernel configuration
     num_inputs = get_kernel_num_inputs(kernel, num_ambient_inputs=num_inputs)
-    input_transform = InverseLengthscaleTransform(kernel)
+    input_transform = transforms.InverseLengthscaleTransform(kernel)
+    
+    # Handle active dimensions if specified
     if kernel.active_dims is not None:
         num_inputs = len(kernel.active_dims)
-        input_transform = ChainedTransform(
-            input_transform, FeatureSelector(indices=kernel.active_dims)
+        input_transform = transforms.ChainedTransform(
+            input_transform, transforms.FeatureSelector(indices=kernel.active_dims)
         )
 
+    # Calculate the constant scaling factor for the features
     constant = torch.tensor(
         2**0.5 * (random_feature_scale or num_random_features**-0.5),
         device=kernel.device,
         dtype=kernel.dtype,
     )
-    output_transforms = [SineCosineTransform(constant)]
+    output_transforms = [transforms.SineCosineTransform(constant)]
 
+    # Handle the cosine_only case by generating random phase shifts
     if cosine_only:
+        # IMPLEMENTATION NOTE: When cosine_only is True, we use cosine features with random phases
+        # instead of paired sine and cosine features. This is important for ProductKernel where
+        # we need to take element-wise products of features.
         bias = 2 * torch.pi * torch.rand(num_random_features, device=kernel.device, dtype=kernel.dtype)
         num_raw_features = num_random_features
     else:
         bias = None
         num_raw_features = num_random_features // 2
 
+    # Generate the weight matrix using the provided weight generator
     weight = weight_generator(
         Size([kernel.batch_shape.numel() * num_raw_features, num_inputs])
     ).reshape(*kernel.batch_shape, num_raw_features, num_inputs)
 
+    # Create and return the FourierFeatureMap with appropriate transforms
     return FourierFeatureMap(
         kernel=kernel,
         weight=weight,
         bias=bias,
         input_transform=input_transform,
-        output_transform=ChainedTransform(*output_transforms),
+        output_transform=transforms.ChainedTransform(*output_transforms),
     )
 
 @GenKernelFeatureMap.register(kernels.RBFKernel)
@@ -145,6 +173,10 @@ def _gen_kernel_feature_map_rbf(
     kernel: kernels.RBFKernel,
     **kwargs: Any,
 ) -> KernelFeatureMap:
+    # IMPLEMENTATION NOTE: This handler generates Fourier features for the RBF kernel.
+    # The RBF (Radial Basis Function) kernel is a stationary kernel, so we can use
+    # random Fourier features to approximate it. The weight generator uses normal
+    # distributions as specified in Rahimi & Recht (2007).
     def _weight_generator(shape: Size) -> Tensor:
         try:
             n, d = shape
@@ -171,6 +203,10 @@ def _gen_kernel_feature_map_matern(
     kernel: kernels.MaternKernel,
     **kwargs: Any,
 ) -> KernelFeatureMap:
+    # IMPLEMENTATION NOTE: This handler generates Fourier features for the Matern kernel.
+    # For Matern kernels, we use a different weight generator that incorporates the
+    # smoothness parameter nu. The weights are sampled from a distribution that depends
+    # on nu, following the spectral density of the Matern kernel.
     def _weight_generator(shape: Size) -> Tensor:
         try:
             n, d = shape
@@ -183,6 +219,7 @@ def _gen_kernel_feature_map_matern(
         device = kernel.device
         nu = torch.tensor(kernel.nu, device=device, dtype=dtype)
         normals = draw_sobol_normal_samples(n=n, d=d, device=device, dtype=dtype)
+        # For Matern kernels, we sample from a Gamma distribution based on nu
         return Gamma(nu, nu).rsample((n, 1)).rsqrt() * normals
 
     return _gen_fourier_features(
@@ -212,12 +249,12 @@ def _gen_kernel_feature_map_scale(
     )
 
     if active_dims is not None and active_dims is not kernel.base_kernel.active_dims:
-        feature_map.input_transform = ChainedTransform(
-            feature_map.input_transform, FeatureSelector(indices=active_dims)
+        feature_map.input_transform = transforms.ChainedTransform(
+            feature_map.input_transform, transforms.FeatureSelector(indices=active_dims)
         )
 
-    feature_map.output_transform = ChainedTransform(
-        OutputscaleTransform(kernel), feature_map.output_transform
+    feature_map.output_transform = transforms.ChainedTransform(
+        transforms.OutputscaleTransform(kernel), feature_map.output_transform
     )
     return feature_map
 
