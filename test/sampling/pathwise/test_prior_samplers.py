@@ -132,7 +132,7 @@ class TestPriorSamplers(BotorchTestCase):
             sample_list = path_list(X)
             self.assertIsInstance(path_list, PathList)
             self.assertIsInstance(sample_list, list)
-            self.assertEqual(len(sample_list), len(path_list.paths))
+            self.assertEqual(len(sample_list), len(path_list._paths_list))
 
         with self.subTest("test_initialization"):
             model = self.models["inferred"][0]

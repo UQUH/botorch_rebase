@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Iterable
 
 import torch
 from botorch import models
@@ -38,7 +38,7 @@ class TestCaseConfig:
 # - Manages task indices for multi-task models
 def gen_random_inputs(
     model: Model,
-    batch_shape: list[int],
+    batch_shape: Iterable[int],
     transformed: bool = False,
     task_id: Optional[int] = None,
     seed: Optional[int] = None,
@@ -55,32 +55,23 @@ def gen_random_inputs(
     Returns:
         Tensor: Random input tensor
     """
-    with (torch.random.fork_rng() if seed is not None else nullcontext()):
+    with (nullcontext() if seed is None else torch.random.fork_rng()):
         if seed:
             torch.random.manual_seed(seed)
 
         (train_X,) = get_train_inputs(model, transformed=True)
         tkwargs = {"device": train_X.device, "dtype": train_X.dtype}
-        
-        # Get input dimension excluding task feature for MultiTaskGP
-        input_dim = train_X.shape[-1]
+        X = torch.rand((*batch_shape, train_X.shape[-1]), **tkwargs)
         if isinstance(model, models.MultiTaskGP):
-            input_dim -= 1  # Subtract task feature dimension
-            
-        # Generate random inputs
-        X = torch.rand((*batch_shape, input_dim), **tkwargs)
-        
-        # Add task feature for MultiTaskGP
-        if isinstance(model, models.MultiTaskGP):
-            task_indices = torch.randint(0, model.num_tasks, (*batch_shape,), **tkwargs)  # Start from 0
-            task_indices = task_indices.unsqueeze(-1)
-            X = torch.cat([X, task_indices], dim=-1)
+            num_tasks = model.task_covar_module.raw_var.shape[-1]
+            task_values = torch.ones(X.shape[:-1], **tkwargs)  # Default to task 1
             if task_id is not None:
-                X[..., -1] = task_id
-                
-        # Apply transforms if needed
+                task_values.fill_(task_id)
+            X[..., model._task_feature] = task_values
+
         if not transformed and hasattr(model, "input_transform"):
-            X = model.input_transform.untransform(X)
+            return model.input_transform.untransform(X)
+
         return X
 
 # gen_module: Factory function for generating test modules
