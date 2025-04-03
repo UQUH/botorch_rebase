@@ -34,6 +34,8 @@ jobs:
     env:
       # `uv pip ...` requires venv by default. This skips that requirement.
       UV_SYSTEM_PYTHON: 1
+      # Set the pretrained models location
+      PRETRAINED_LOCATION: ${{ github.workspace }}/tutorials/pretrained_models
     steps:
     - uses: actions/checkout@v4
     - name: Install uv
