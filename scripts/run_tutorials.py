@@ -26,8 +26,10 @@ def run_script(
 ) -> None:
     if env is not None:
         env = {**os.environ, **env}
+    else:
+        env = {**os.environ}  # Make sure we include all environment variables
     run_out = subprocess.run(
-        ["papermill", tutorial, "|"],
+        ["papermill", str(tutorial), "-"],  # Changed '|' to '-' for stdout
         capture_output=True,
         text=True,
         env=env,
@@ -51,7 +53,10 @@ def run_tutorial(
     timeout_minutes = 5 if smoke_test else 30
     tic = time.monotonic()
     print(f"Running tutorial {tutorial.name}.")
-    env = {"SMOKE_TEST": "True"} if smoke_test else None
+    # Include all environment variables and add SMOKE_TEST if needed
+    env = {**os.environ}
+    if smoke_test:
+        env["SMOKE_TEST"] = "True"
     try:
         mem_usage, run_out = memory_usage(
             (run_script, (tutorial, timeout_minutes), {"env": env}),
