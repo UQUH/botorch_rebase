@@ -12,7 +12,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 import torch
-from torch import Size
+from torch import Size as torch_Size
 from gpytorch.likelihoods import BernoulliLikelihood
 from gpytorch.models import ExactGP
 from gpytorch.utils.cholesky import psd_safe_cholesky
@@ -37,7 +37,7 @@ class TestGaussianUpdates(BotorchTestCase):
     def setUp(self) -> None:
         super().setUp()
         config = TestCaseConfig(seed=0, device=self.device)
-        batch_config = replace(config, batch_shape=Size([2]))
+        batch_config = replace(config, batch_shape=torch_Size([2]))
 
         self.base_models = [
             (batch_config, gen_module(models.SingleTaskGP, batch_config)),
