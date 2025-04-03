@@ -44,8 +44,8 @@ from botorch.utils.dispatcher import Dispatcher
 from botorch.utils.transforms import is_ensemble
 from gpytorch.models import ApproximateGP, ExactGP, GP
 from gpytorch.variational import _VariationalStrategy
-from torch import Size, Tensor
-from typing import Any
+from torch import Size
+from typing import Any, Optional
 
 DrawMatheronPaths = Dispatcher("draw_matheron_paths")
 
@@ -71,8 +71,8 @@ class MatheronPath(PathDict):
         self,
         prior_paths: SamplePath,
         update_paths: SamplePath,
-        input_transform: TInputTransform | None = None,
-        output_transform: TOutputTransform | None = None,
+        input_transform: Optional[TInputTransform] = None,
+        output_transform: Optional[TOutputTransform] = None,
     ) -> None:
         r"""Initializes a MatheronPath instance.
 
@@ -117,7 +117,7 @@ def get_matheron_path_model(
     if isinstance(model, ModelList) and len(model.models) != num_outputs:
         raise UnsupportedError("A model-list of multi-output models is not supported.")
 
-    def f(X: Tensor) -> Tensor:
+    def f(X: torch.Tensor) -> torch.Tensor:
         r"""Reshapes the path evaluations to bring the output dimension to the end.
 
         Args:
@@ -152,6 +152,7 @@ def draw_matheron_paths(
     sample_shape: Size,
     prior_sampler: TPathwisePriorSampler = draw_kernel_feature_paths,
     update_strategy: TPathwiseUpdate = gaussian_update,
+    **kwargs: Any,
 ) -> MatheronPath:
     r"""Generates function draws from (an approximate) Gaussian process posterior.
 
@@ -163,10 +164,11 @@ def draw_matheron_paths(
     Args:
         model: Gaussian process whose posterior is to be sampled.
         sample_shape: Sizes of sample dimensions.
-        prior_sample: A callable that takes a model and a sample shape and returns
+        prior_sampler: A callable that takes a model and a sample shape and returns
             a set of sample paths representing the prior.
         update_strategy: A callable that takes a model and a tensor of prior process
             values and returns a set of sample paths representing the data.
+        **kwargs: Additional keyword arguments are passed to subroutines.
     """
 
     return DrawMatheronPaths(
@@ -174,6 +176,7 @@ def draw_matheron_paths(
         sample_shape=sample_shape,
         prior_sampler=prior_sampler,
         update_strategy=update_strategy,
+        **kwargs,
     )
 
 
@@ -231,19 +234,15 @@ def _draw_matheron_paths_ExactGP(
 def _draw_matheron_paths_ApproximateGPyTorch(
     model: ApproximateGPyTorchModel, **kwargs: Any
 ) -> MatheronPath:
-    # Handle ApproximateGPyTorchModel by drawing paths from inner model and applying transforms
     paths = draw_matheron_paths(model.model, **kwargs)
-    
-    # Add input transform if present
     input_transform = get_input_transform(model)
     if input_transform:
         append_transform(
             module=paths,
-            attr_name="input_transform", 
+            attr_name="input_transform",
             transform=input_transform,
         )
 
-    # Add output transform if present
     output_transform = get_output_transform(model)
     if output_transform:
         prepend_transform(
@@ -259,7 +258,6 @@ def _draw_matheron_paths_ApproximateGPyTorch(
 def _draw_matheron_paths_ApproximateGP(
     model: ApproximateGP, **kwargs: Any
 ) -> MatheronPath:
-    # Delegate to strategy-specific handler
     return DrawMatheronPaths(model, model.variational_strategy, **kwargs)
 
 
@@ -273,7 +271,7 @@ def _draw_matheron_paths_ApproximateGP_fallback(
     update_strategy: TPathwiseUpdate,
     **kwargs: Any,
 ) -> MatheronPath:
-    # Get inducing points (assumed to be pre-transformed)
+    # Note: Inducing points are assumed to be pre-transformed
     Z = model.variational_strategy.inducing_points
 
     # Generate draws from the prior

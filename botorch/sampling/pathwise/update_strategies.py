@@ -86,9 +86,13 @@ def _gaussian_update_exact(
     if isinstance(noise_covariance, (NoneType, ZeroLinearOperator)):
         scale_tril = kernel(points).cholesky() if scale_tril is None else scale_tril
     else:
-        noise_values = torch.randn_like(sample_values).unsqueeze(-1)
-        noise_values = noise_covariance.cholesky() @ noise_values
-        sample_values = sample_values + noise_values.squeeze(-1)
+        # Generate noise values with correct shape
+        noise_shape = sample_values.shape[-len(target_values.shape):]
+        noise_values = torch.randn(noise_shape, device=sample_values.device, dtype=sample_values.dtype)
+        noise_values = (
+            noise_covariance.cholesky() @ noise_values.unsqueeze(-1)
+        ).squeeze(-1)
+        sample_values = sample_values + noise_values
         scale_tril = (
             SumLinearOperator(kernel(points), noise_covariance).cholesky()
             if scale_tril is None
@@ -161,7 +165,11 @@ def _draw_kernel_feature_paths_MultiTaskGP(
 
     # Prepare product kernel
     num_inputs = points.shape[-1]
-    task_index = model._task_feature
+    task_index = (
+        num_inputs + model._task_feature
+        if model._task_feature < 0
+        else model._task_feature
+    )
     base_kernel = deepcopy(model.covar_module)
     base_kernel.active_dims = torch.LongTensor(
         [index for index in range(num_inputs) if index != task_index],

@@ -28,7 +28,7 @@ class SamplePath(ABC, TransformedModuleMixin, Module):
     r"""Abstract base class for Botorch sample paths."""
 
 
-class PathDict(SamplePath):
+class PathDict(SamplePath, ModuleDictMixin[SamplePath]):
     r"""A dictionary of SamplePaths."""
 
     def __init__(
@@ -48,31 +48,24 @@ class PathDict(SamplePath):
             output_transform: An optional output transform for the module.
                 Can only be specified if reducer is provided.
         """
-        # Validate that output_transform is only used with a reducer
         if reducer is None and output_transform is not None:
             raise UnsupportedError(
                 "`output_transform` must be preceded by a `reducer`."
             )
 
-        # Initialize parent class
-        super().__init__()
-        
-        # Store transforms and reducer
+        SamplePath.__init__(self)
         self.reducer = reducer
         self.input_transform = input_transform
         self.output_transform = output_transform
-
-        # Initialize paths dictionary
+        
+        # Initialize paths dictionary - reuse ModuleDict if provided
         self._paths_dict = (
             paths if isinstance(paths, ModuleDict) else ModuleDict({} if paths is None else paths)
         )
-        # Register paths as a module
         self.register_module("_paths_dict", self._paths_dict)
 
     def forward(self, x: Tensor, **kwargs: Any) -> Tensor | dict[str, Tensor]:
-        # Apply each path to input and collect outputs
         outputs = [path(x, **kwargs) for path in self._paths_dict.values()]
-        # Either return dict mapping paths to outputs, or reduce outputs
         return dict(zip(self._paths_dict, outputs)) if self.reducer is None else self.reducer(outputs)
 
     def items(self) -> Iterable[tuple[str, SamplePath]]:
@@ -100,7 +93,7 @@ class PathDict(SamplePath):
         self._paths_dict[key] = val
 
 
-class PathList(SamplePath):
+class PathList(SamplePath, ModuleListMixin[SamplePath]):
     r"""A list of SamplePaths."""
 
     def __init__(
@@ -120,31 +113,24 @@ class PathList(SamplePath):
             output_transform: An optional output transform for the module.
                 Can only be specified if reducer is provided.
         """
-        # Validate that output_transform is only used with a reducer
         if reducer is None and output_transform is not None:
             raise UnsupportedError(
                 "`output_transform` must be preceded by a `reducer`."
             )
 
-        # Initialize parent class
-        super().__init__()
-        
-        # Store transforms and reducer
+        SamplePath.__init__(self)
         self.reducer = reducer
         self.input_transform = input_transform
         self.output_transform = output_transform
-
-        # Initialize paths list
+        
+        # Initialize paths list - reuse ModuleList if provided
         self._paths_list = (
             paths if isinstance(paths, ModuleList) else ModuleList([] if paths is None else paths)
         )
-        # Register paths as a module
         self.register_module("_paths_list", self._paths_list)
 
     def forward(self, x: Tensor, **kwargs: Any) -> Tensor | list[Tensor]:
-        # Apply each path to input and collect outputs
         outputs = [path(x, **kwargs) for path in self._paths_list]
-        # Either return list of outputs or reduce outputs
         return outputs if self.reducer is None else self.reducer(outputs)
 
     def __len__(self) -> int:
@@ -199,16 +185,10 @@ class GeneralizedLinearPath(SamplePath):
         self.output_transform = output_transform
 
     def forward(self, x: Tensor, **kwargs) -> Tensor:
-        # Get features from feature map
         features = self.feature_map(x, **kwargs)
-        # Apply linear combination with weights
         output = (features @ self.weight.unsqueeze(-1)).squeeze(-1)
-        
-        # Handle multi-dimensional features by summing over extra dimensions
         ndim = len(self.feature_map.output_shape)
         if ndim > 1:  # sum over the remaining feature dimensions
-            # Use einsum to sum over all but the last dimension
             output = einsum(f"...{ascii_letters[:ndim - 1]}->...", output)
 
-        # Add bias if provided
         return output if self.bias_module is None else output + self.bias_module(x)
