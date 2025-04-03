@@ -35,6 +35,17 @@ from torch.utils.data import TensorDataset
 
 
 class FeatureMap(TransformedModuleMixin, Module):
+    """Base class for feature maps.
+    
+    Attributes:
+        raw_output_shape: The shape of the raw output before any transformations
+        batch_shape: The batch shape of the feature map
+        input_transform: Optional input transform to apply
+        output_transform: Optional output transform to apply
+        device: The device on which the feature map parameters are stored
+        dtype: The data type of the feature map parameters
+    """
+
     raw_output_shape: Size
     batch_shape: Size
     input_transform: Optional[TInputTransform]
@@ -44,10 +55,20 @@ class FeatureMap(TransformedModuleMixin, Module):
 
     @abstractmethod
     def forward(self, x: Tensor, **kwargs: Any) -> Any:
+        """Forward pass of the feature map.
+        
+        Args:
+            x: Input tensor
+            **kwargs: Additional keyword arguments
+            
+        Returns:
+            The feature map output
+        """
         pass
 
     @property
     def output_shape(self) -> Size:
+        """The shape of the transformed output."""
         if self.output_transform is None:
             return self.raw_output_shape
 
@@ -64,6 +85,9 @@ class FeatureMapList(Module, ModuleListMixin[FeatureMap]):
     
     This class provides list-like access to a collection of feature maps while ensuring
     proper PyTorch module registration and parameter tracking.
+    
+    Args:
+        feature_maps: An iterable of feature maps
     """
 
     def __init__(self, feature_maps: Iterable[FeatureMap]):
@@ -71,6 +95,15 @@ class FeatureMapList(Module, ModuleListMixin[FeatureMap]):
         ModuleListMixin.__init__(self, attr_name="feature_maps", modules=feature_maps)
 
     def forward(self, x: Tensor, **kwargs: Any) -> List[Union[Tensor, LinearOperator]]:
+        """Forward pass applying each feature map in sequence.
+        
+        Args:
+            x: Input tensor
+            **kwargs: Additional keyword arguments
+            
+        Returns:
+            List of feature map outputs
+        """
         return [feature_map(x, **kwargs) for feature_map in self]
 
     @property

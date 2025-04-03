@@ -35,7 +35,7 @@ from linear_operator.operators import (
     SumLinearOperator,
     ZeroLinearOperator,
 )
-from torch import Tensor
+from torch import Size, Tensor
 
 TPathwiseUpdate = Callable[[GP, Tensor], SamplePath]
 GaussianUpdate = Dispatcher("gaussian_update")
@@ -47,25 +47,27 @@ def gaussian_update(
     likelihood: Likelihood | None = DEFAULT,
     **kwargs: Any,
 ) -> GeneralizedLinearPath:
-    r"""Computes a Gaussian pathwise update in exact arithmetic:
-
-    .. code-block:: text
-
-        (f | y)(·) = f(·) + Cov(f(·), y) Cov(y, y)^{-1} (y - f(X) - ε),
-                            \_______________________________________/
-                                                V
-                                    "Gaussian pathwise update"
-
-    where `=` denotes equality in distribution, :math:`f \sim GP(0, k)`,
-    :math:`y \sim N(f(X), \Sigma)`, and :math:`\epsilon \sim N(0, \Sigma)`.
+    """Computes a Gaussian pathwise update in exact arithmetic.
+    
+    The update has the form:
+    
+    .. math::
+        (f | y)(·) = f(·) + Cov(f(·), y) Cov(y, y)^{-1} (y - f(X) - ε)
+    
+    where :math:`f \\sim GP(0, k)`, :math:`y \\sim N(f(X), \\Sigma)`, and 
+    :math:`\\epsilon \\sim N(0, \\Sigma)`.
+    
     For more information, see [wilson2020sampling]_ and [wilson2021pathwise]_.
 
     Args:
-        model: A Gaussian process prior together with a likelihood.
-        sample_values: Assumed values for :math:`f(X)`.
-        likelihood: An optional likelihood used to help define the desired
-            update. Defaults to `model.likelihood` if it exists else None.
-        **kwargs: Additional keyword arguments are passed to subroutines.
+        model: A Gaussian process prior together with a likelihood
+        sample_values: Assumed values for :math:`f(X)`
+        likelihood: Optional likelihood used to help define the desired update.
+            Defaults to `model.likelihood` if it exists else None.
+        **kwargs: Additional keyword arguments passed to subroutines
+            
+    Returns:
+        A GeneralizedLinearPath representing the Gaussian update
     """
     if likelihood is DEFAULT:
         likelihood = getattr(model, "likelihood", None)
@@ -82,6 +84,20 @@ def _gaussian_update_exact(
     scale_tril: Tensor | LinearOperator | None = None,
     input_transform: TInputTransform | None = None,
 ) -> GeneralizedLinearPath:
+    """Exact Gaussian update computation.
+    
+    Args:
+        kernel: The kernel function
+        points: Points at which to evaluate the kernel
+        target_values: Target values for the update
+        sample_values: Sample values from the prior
+        noise_covariance: Optional noise covariance matrix
+        scale_tril: Optional pre-computed Cholesky factor
+        input_transform: Optional input transform
+        
+    Returns:
+        A GeneralizedLinearPath representing the exact Gaussian update
+    """
     # Prepare Cholesky factor of `Cov(y, y)` and noise sample values as needed
     if isinstance(noise_covariance, (NoneType, ZeroLinearOperator)):
         scale_tril = kernel(points).cholesky() if scale_tril is None else scale_tril

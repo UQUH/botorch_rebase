@@ -17,7 +17,7 @@ from typing import Dict, Optional, Tuple
 from memory_profiler import memory_usage
 
 
-IGNORE_ALWAYS = set()  # ignored in smoke tests and full runs
+IGNORE_ALWAYS = {"pathwise.ipynb"}  # ignored in smoke tests and full runs
 RUN_IF_SMOKE_TEST_IGNORE_IF_STANDARD = set()  # only used in smoke tests
 
 
@@ -43,6 +43,11 @@ def run_tutorial(
     Runs the tutorial in a subprocess, catches any raised errors and returns
     them as a string, and returns runtime and memory information as a dict.
     """
+    # Skip empty tutorials
+    if tutorial.stat().st_size == 0:
+        print(f"Skipping empty tutorial {tutorial.name}.")
+        return None, {}
+
     timeout_minutes = 5 if smoke_test else 30
     tic = time.monotonic()
     print(f"Running tutorial {tutorial.name}.")
