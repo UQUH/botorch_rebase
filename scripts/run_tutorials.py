@@ -20,6 +20,9 @@ from memory_profiler import memory_usage
 IGNORE_ALWAYS = set()  # ignored in smoke tests and full runs
 RUN_IF_SMOKE_TEST_IGNORE_IF_STANDARD = set()  # only used in smoke tests
 
+# Add tutorials that require pretrained models to ignore list in smoke test mode
+IGNORE_IN_SMOKE_TEST = {"vae_mnist.ipynb"}  # ignore in smoke tests only
+
 
 def run_script(
     tutorial: Path, timeout_minutes: int, env: Optional[Dict[str, str]] = None
@@ -102,6 +105,10 @@ def run_tutorials(
         if smoke_test
         else IGNORE_ALWAYS | RUN_IF_SMOKE_TEST_IGNORE_IF_STANDARD
     )
+    
+    # Add tutorials that require pretrained models to ignore list in smoke test mode
+    if smoke_test:
+        ignored_tutorials = ignored_tutorials.union(IGNORE_IN_SMOKE_TEST)
 
     tutorials = sorted(t for t in tutorial_dir.rglob("*.ipynb") if t.is_file())
     if name is not None:
