@@ -1,0 +1,926 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>botorch.utils.testing &mdash; BoTorch  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=ca3e82f4" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            BoTorch
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../acquisition.html">botorch.acquisition</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../models.html">botorch.models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../generation.html">botorch.generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../posteriors.html">botorch.posteriors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../optim.html">botorch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../fit.html">botorch.fit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../sampling.html">botorch.sampling</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cross_validation.html">botorch.cross_validation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../settings.html">botorch.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../logging.html">botorch.logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../test_functions.html">botorch.test_functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../test_utils.html">botorch.test_utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../exceptions.html">botorch.exceptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../utils.html">botorch.utils</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">BoTorch</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">botorch.utils.testing</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for botorch.utils.testing</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Copyright (c) Meta Platforms, Inc. and affiliates.</span>
+<span class="c1">#</span>
+<span class="c1"># This source code is licensed under the MIT license found in the</span>
+<span class="c1"># LICENSE file in the root directory of this source tree.</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">abstractmethod</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">OrderedDict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Sequence</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">itertools</span><span class="w"> </span><span class="kn">import</span> <span class="n">product</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">unittest</span><span class="w"> </span><span class="kn">import</span> <span class="n">mock</span><span class="p">,</span> <span class="n">TestCase</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.acquisition.objective</span><span class="w"> </span><span class="kn">import</span> <span class="n">PosteriorTransform</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.exceptions.warnings</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">BotorchTensorDimensionWarning</span><span class="p">,</span>
+    <span class="n">InputDataWarning</span><span class="p">,</span>
+    <span class="n">NumericsWarning</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.models.model</span><span class="w"> </span><span class="kn">import</span> <span class="n">FantasizeMixin</span><span class="p">,</span> <span class="n">Model</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.posteriors.gpytorch</span><span class="w"> </span><span class="kn">import</span> <span class="n">GPyTorchPosterior</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.posteriors.posterior</span><span class="w"> </span><span class="kn">import</span> <span class="n">Posterior</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">MCSampler</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.get_sampler</span><span class="w"> </span><span class="kn">import</span> <span class="n">GetSampler</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.stochastic_samplers</span><span class="w"> </span><span class="kn">import</span> <span class="n">StochasticSampler</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.test_functions.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseTestProblem</span><span class="p">,</span> <span class="n">CorruptedTestProblem</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.test_functions.synthetic</span><span class="w"> </span><span class="kn">import</span> <span class="n">Rosenbrock</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.utils.transforms</span><span class="w"> </span><span class="kn">import</span> <span class="n">unnormalize</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gpytorch.distributions</span><span class="w"> </span><span class="kn">import</span> <span class="n">MultitaskMultivariateNormal</span><span class="p">,</span> <span class="n">MultivariateNormal</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">linear_operator.operators</span><span class="w"> </span><span class="kn">import</span> <span class="n">AddedDiagLinearOperator</span><span class="p">,</span> <span class="n">DiagLinearOperator</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tensor</span>
+
+
+<span class="n">EMPTY_SIZE</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">()</span>
+
+
+<div class="viewcode-block" id="BotorchTestCase">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.BotorchTestCase">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">BotorchTestCase</span><span class="p">(</span><span class="n">TestCase</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Basic test case for Botorch.</span>
+
+<span class="sd">    This</span>
+<span class="sd">        1. sets the default device to be `torch.device(&quot;cpu&quot;)`</span>
+<span class="sd">        2. ensures that no warnings are suppressed by default.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="BotorchTestCase.setUp">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.BotorchTestCase.setUp">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setUp</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">suppress_input_warnings</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set up the test case.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            suppress_input_warnings: If True, suppress common input warnings</span>
+<span class="sd">                (see below).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">resetwarnings</span><span class="p">()</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">simplefilter</span><span class="p">(</span><span class="s2">&quot;always&quot;</span><span class="p">,</span> <span class="n">append</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">suppress_input_warnings</span><span class="p">:</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span>
+                <span class="s2">&quot;ignore&quot;</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="s2">&quot;The model inputs are of type&quot;</span><span class="p">,</span>
+                <span class="n">category</span><span class="o">=</span><span class="n">InputDataWarning</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span>
+                <span class="s2">&quot;ignore&quot;</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="s2">&quot;Non-strict enforcement of botorch tensor conventions.&quot;</span><span class="p">,</span>
+                <span class="n">category</span><span class="o">=</span><span class="n">BotorchTensorDimensionWarning</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span>
+                <span class="s2">&quot;ignore&quot;</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="sa">r</span><span class="s2">&quot;Data \(outcome observations\) is not standardized &quot;</span><span class="p">,</span>
+                <span class="n">category</span><span class="o">=</span><span class="n">InputDataWarning</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span>
+                <span class="s2">&quot;ignore&quot;</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="sa">r</span><span class="s2">&quot;Data \(input features\) is not&quot;</span><span class="p">,</span>
+                <span class="n">category</span><span class="o">=</span><span class="n">InputDataWarning</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span>
+                <span class="s2">&quot;ignore&quot;</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="s2">&quot;has known numerical issues&quot;</span><span class="p">,</span>
+                <span class="n">category</span><span class="o">=</span><span class="n">NumericsWarning</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span>
+                <span class="s2">&quot;ignore&quot;</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="s2">&quot;Model converter code is deprecated&quot;</span><span class="p">,</span>
+                <span class="n">category</span><span class="o">=</span><span class="ne">DeprecationWarning</span><span class="p">,</span>
+            <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="BotorchTestCase.assertAllClose">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.BotorchTestCase.assertAllClose">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">assertAllClose</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="nb">input</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+        <span class="n">other</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+        <span class="n">rtol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-05</span><span class="p">,</span>
+        <span class="n">atol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-08</span><span class="p">,</span>
+        <span class="n">equal_nan</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Assert that two tensors are close.</span>
+
+<span class="sd">        Calls torch.testing.assert_close, using the signature and default behavior</span>
+<span class="sd">        of torch.allclose.</span>
+
+<span class="sd">        The formula asserted is abs(input - other) &lt;= atol + rtol * abs(other).</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            input: First tensor or tensor-or-scalar-like to compare</span>
+<span class="sd">            other: Second tensor or tensor-or-scalar-like to compare</span>
+<span class="sd">            rtol: Relative tolerance</span>
+<span class="sd">            atol: Absolute tolerance</span>
+<span class="sd">            equal_nan: If True, consider NaN values as equal</span>
+
+<span class="sd">        Example output:</span>
+<span class="sd">            AssertionError: Scalars are not close!</span>
+
+<span class="sd">            Absolute difference: 1.0000034868717194 (up to 0.0001 allowed)</span>
+<span class="sd">            Relative difference: 0.8348668001940709 (up to 1e-05 allowed)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Why not just use the signature and behavior of `torch.testing.assert_close`?</span>
+        <span class="c1"># Because we used `torch.allclose` for testing in the past, and the two don&#39;t</span>
+        <span class="c1"># behave exactly the same. In particular, `assert_close` requires both `atol`</span>
+        <span class="c1"># and `rtol` to be set if either one is.</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">testing</span><span class="o">.</span><span class="n">assert_close</span><span class="p">(</span>
+            <span class="nb">input</span><span class="p">,</span>
+            <span class="n">other</span><span class="p">,</span>
+            <span class="n">rtol</span><span class="o">=</span><span class="n">rtol</span><span class="p">,</span>
+            <span class="n">atol</span><span class="o">=</span><span class="n">atol</span><span class="p">,</span>
+            <span class="n">equal_nan</span><span class="o">=</span><span class="n">equal_nan</span><span class="p">,</span>
+        <span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="BaseTestProblemTestCaseMixIn">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.BaseTestProblemTestCaseMixIn">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">BaseTestProblemTestCaseMixIn</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Mixin for testing BaseTestProblem (functions) implementations.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="BaseTestProblemTestCaseMixIn.test_forward_and_evaluate_true">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.BaseTestProblemTestCaseMixIn.test_forward_and_evaluate_true">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_forward_and_evaluate_true</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Run every BaseTestProblem in `self.functions` on random inputs.</span>
+<span class="sd">        Runs both `forward` and `evaluate_true`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">dtypes</span> <span class="o">=</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">double</span><span class="p">)</span>
+        <span class="n">batch_shapes</span> <span class="o">=</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">(),</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">([</span><span class="mi">2</span><span class="p">]),</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">([</span><span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">]))</span>
+        <span class="k">for</span> <span class="n">dtype</span><span class="p">,</span> <span class="n">batch_shape</span><span class="p">,</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">product</span><span class="p">(</span><span class="n">dtypes</span><span class="p">,</span> <span class="n">batch_shapes</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">functions</span><span class="p">):</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+            <span class="n">X</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">dim</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+            <span class="n">X</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">bounds</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">X</span> <span class="o">*</span> <span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">bounds</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">f</span><span class="o">.</span><span class="n">bounds</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="n">res_forward</span> <span class="o">=</span> <span class="n">f</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+            <span class="n">res_evaluate_true</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">evaluate_true</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">method</span><span class="p">,</span> <span class="n">res</span> <span class="ow">in</span> <span class="p">{</span>
+                <span class="s2">&quot;forward&quot;</span><span class="p">:</span> <span class="n">res_forward</span><span class="p">,</span>
+                <span class="s2">&quot;evaluate_true&quot;</span><span class="p">:</span> <span class="n">res_evaluate_true</span><span class="p">,</span>
+            <span class="p">}</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">subTest</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">dtype</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">batch_shape</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">method</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">):</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">dtype</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">device</span><span class="o">.</span><span class="n">type</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="o">.</span><span class="n">type</span><span class="p">)</span>
+                    <span class="n">tail_shape</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">(</span>
+                        <span class="p">[</span><span class="n">f</span><span class="o">.</span><span class="n">num_objectives</span><span class="p">]</span> <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">num_objectives</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="p">[]</span>
+                    <span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">batch_shape</span> <span class="o">+</span> <span class="n">tail_shape</span><span class="p">)</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">functions</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">BaseTestProblem</span><span class="p">]:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;The functions that should be tested.</span>
+
+<span class="sd">        Typically defined as a class attribute on the test case subclassing this class.</span>
+<span class="sd">        &quot;&quot;&quot;</span></div>
+
+
+
+<div class="viewcode-block" id="SyntheticTestFunctionTestCaseMixin">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.SyntheticTestFunctionTestCaseMixin">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">SyntheticTestFunctionTestCaseMixin</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Mixin for testing synthetic `BaseTestProblem` aka test functions.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="SyntheticTestFunctionTestCaseMixin.test_optimal_value">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.SyntheticTestFunctionTestCaseMixin.test_optimal_value">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_optimal_value</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Test that a function&#39;s optimal_value is correctly computed,</span>
+<span class="sd">        and defined if it should be.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">dtype</span> <span class="ow">in</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">double</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">functions</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">_optimal_value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">assertRaisesRegex</span><span class="p">(</span><span class="ne">NotImplementedError</span><span class="p">,</span> <span class="s2">&quot;optimal value&quot;</span><span class="p">):</span>
+                        <span class="n">f</span><span class="o">.</span><span class="n">optimal_value</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">optval</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">optimal_value</span>
+                    <span class="n">optval_exp</span> <span class="o">=</span> <span class="o">-</span><span class="n">f</span><span class="o">.</span><span class="n">_optimal_value</span> <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">negate</span> <span class="k">else</span> <span class="n">f</span><span class="o">.</span><span class="n">_optimal_value</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">optval</span><span class="p">,</span> <span class="n">optval_exp</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="SyntheticTestFunctionTestCaseMixin.test_optimizer">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.SyntheticTestFunctionTestCaseMixin.test_optimizer">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_optimizer</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Test that optimizers are correctly computed.&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">dtype</span> <span class="ow">in</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">double</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">functions</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">Xopt</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">optimizers</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">requires_grad_</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">NotImplementedError</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="n">res</span> <span class="o">=</span> <span class="n">f</span><span class="p">(</span><span class="n">Xopt</span><span class="p">,</span> <span class="n">noise</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+                <span class="c1"># if we have optimizers, we have the optimal value</span>
+                <span class="n">res_exp</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">full_like</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">optimal_value</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">assertAllClose</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">res_exp</span><span class="p">,</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">rtol</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">_check_grad_at_opt</span><span class="p">:</span>
+                    <span class="n">grad</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">grad</span><span class="p">([</span><span class="o">*</span><span class="n">res</span><span class="p">],</span> <span class="n">Xopt</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">assertLess</span><span class="p">(</span><span class="n">grad</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">max</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span> <span class="mf">1e-3</span><span class="p">)</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">functions</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">BaseTestProblem</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;The functions that should be tested.</span>
+
+<span class="sd">        Typically defined as a class attribute on the test case subclassing this class.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span>  <span class="c1"># pragma: no cover</span></div>
+
+
+
+<div class="viewcode-block" id="MultiObjectiveTestProblemTestCaseMixin">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MultiObjectiveTestProblemTestCaseMixin">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MultiObjectiveTestProblemTestCaseMixin</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Mixin for testing multi-objective test problems.</span>
+
+<span class="sd">    This class provides test cases for attributes,</span>
+<span class="sd">    maximum hypervolume, and reference points</span>
+<span class="sd">    of multi-objective test problems.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="MultiObjectiveTestProblemTestCaseMixin.test_attributes">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MultiObjectiveTestProblemTestCaseMixin.test_attributes">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_attributes</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Test that each function has the required attributes.&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">functions</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="nb">hasattr</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="s2">&quot;dim&quot;</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="nb">hasattr</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="s2">&quot;num_objectives&quot;</span><span class="p">))</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">bounds</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">([</span><span class="mi">2</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">dim</span><span class="p">]))</span></div>
+
+
+<div class="viewcode-block" id="MultiObjectiveTestProblemTestCaseMixin.test_max_hv">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MultiObjectiveTestProblemTestCaseMixin.test_max_hv">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_max_hv</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Test the maximum hypervolume (max_hv) attribute for each function.&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">dtype</span> <span class="ow">in</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">double</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">functions</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">_max_hv</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">assertRaises</span><span class="p">(</span><span class="ne">NotImplementedError</span><span class="p">):</span>
+                        <span class="n">f</span><span class="o">.</span><span class="n">max_hv</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">max_hv</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">_max_hv</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="MultiObjectiveTestProblemTestCaseMixin.test_ref_point">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MultiObjectiveTestProblemTestCaseMixin.test_ref_point">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_ref_point</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Test the reference point (ref_point) attribute</span>
+<span class="sd">        for each function (for each dtype).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">dtype</span> <span class="ow">in</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">double</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">functions</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span>
+                    <span class="n">torch</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span>
+                        <span class="n">f</span><span class="o">.</span><span class="n">ref_point</span><span class="p">,</span>
+                        <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">_ref_point</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">),</span>
+                    <span class="p">)</span>
+                <span class="p">)</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">functions</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">BaseTestProblem</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;The functions that should be tested.</span>
+
+<span class="sd">        Typically defined as a class attribute on the test case subclassing this class.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span>  <span class="c1"># pragma: no cover</span></div>
+
+
+
+<div class="viewcode-block" id="ConstrainedTestProblemTestCaseMixin">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.ConstrainedTestProblemTestCaseMixin">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ConstrainedTestProblemTestCaseMixin</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Mixin for testing constrained test problems.</span>
+
+<span class="sd">    This class provides test cases for attributes and methods</span>
+<span class="sd">    of constrained test problems, including testing the number of</span>
+<span class="sd">    constraints and the evaluation of constraint slack.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="ConstrainedTestProblemTestCaseMixin.test_num_constraints">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.ConstrainedTestProblemTestCaseMixin.test_num_constraints">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_num_constraints</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Test that each function has the required num_constraints attribute.&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">functions</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="nb">hasattr</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="s2">&quot;num_constraints&quot;</span><span class="p">))</span></div>
+
+
+<div class="viewcode-block" id="ConstrainedTestProblemTestCaseMixin.test_evaluate_slack">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.ConstrainedTestProblemTestCaseMixin.test_evaluate_slack">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">test_evaluate_slack</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Test the evaluate_slack method for each function.</span>
+
+<span class="sd">        This test verifies that:</span>
+
+<span class="sd">        1. The evaluate_slack_true and evaluate_slack methods</span>
+<span class="sd">            return tensors of the expected shape</span>
+
+<span class="sd">        2. The relationship between evaluate_slack and evaluate_slack_true</span>
+<span class="sd">        is consistent with the constraint_noise_std attribute of the function</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">dtype</span> <span class="ow">in</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">double</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">functions</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+                <span class="n">X</span> <span class="o">=</span> <span class="n">unnormalize</span><span class="p">(</span>
+                    <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">dim</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">),</span>
+                    <span class="n">bounds</span><span class="o">=</span><span class="n">f</span><span class="o">.</span><span class="n">bounds</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">slack_true</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">evaluate_slack_true</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+                <span class="c1"># Mock out the random generator to ensure that noise realizations are</span>
+                <span class="c1"># sizable so we don&#39;t run into any floating point comparison issues.</span>
+                <span class="k">with</span> <span class="n">mock</span><span class="o">.</span><span class="n">patch</span><span class="p">(</span>
+                    <span class="s2">&quot;botorch.test_functions.base.torch.randn_like&quot;</span><span class="p">,</span>
+                    <span class="n">side_effect</span><span class="o">=</span><span class="k">lambda</span> <span class="n">y</span><span class="p">:</span> <span class="n">y</span><span class="p">,</span>
+                <span class="p">):</span>
+                    <span class="n">slack_observed</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">evaluate_slack</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>
+
+                <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">slack_true</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">num_constraints</span><span class="p">]))</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span>
+                    <span class="n">slack_observed</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="n">f</span><span class="o">.</span><span class="n">num_constraints</span><span class="p">])</span>
+                <span class="p">)</span>
+                <span class="n">is_equal</span> <span class="o">=</span> <span class="p">(</span><span class="n">slack_observed</span> <span class="o">==</span> <span class="n">slack_true</span><span class="p">)</span><span class="o">.</span><span class="n">bool</span><span class="p">()</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">constraint_noise_std</span><span class="p">,</span> <span class="nb">float</span><span class="p">):</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span>
+                        <span class="n">is_equal</span><span class="o">.</span><span class="n">all</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span> <span class="n">f</span><span class="o">.</span><span class="n">constraint_noise_std</span> <span class="o">==</span> <span class="mf">0.0</span>
+                    <span class="p">)</span>
+                <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">constraint_noise_std</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+                    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">noise_std</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">constraint_noise_std</span><span class="p">):</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span>
+                            <span class="n">is_equal</span><span class="p">[:,</span> <span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">item</span><span class="p">(),</span> <span class="n">noise_std</span> <span class="ow">in</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+                        <span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="n">is_equal</span><span class="o">.</span><span class="n">all</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">())</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">functions</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">BaseTestProblem</span><span class="p">]:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;The functions that should be tested.</span>
+
+<span class="sd">        Typically defined as a class attribute on the test case subclassing this class.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span>  <span class="c1"># pragma: no cover</span></div>
+
+
+
+<div class="viewcode-block" id="TestCorruptedProblemsMixin">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.TestCorruptedProblemsMixin">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">TestCorruptedProblemsMixin</span><span class="p">(</span><span class="n">BotorchTestCase</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Mixin for testing corrupted test problems.</span>
+
+<span class="sd">    This class provides setup and utility functions</span>
+<span class="sd">    for testing corrupted test problems using a specified outlier generator</span>
+<span class="sd">    and a Rosenbrock problem.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="TestCorruptedProblemsMixin.setUp">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.TestCorruptedProblemsMixin.setUp">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">setUp</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">suppress_input_warnings</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Set up the test case with a dummy outlier generator</span>
+<span class="sd">        and a Rosenbrock problem.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            suppress_input_warnings: If True, suppress common input warnings.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">setUp</span><span class="p">(</span><span class="n">suppress_input_warnings</span><span class="o">=</span><span class="n">suppress_input_warnings</span><span class="p">)</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">outlier_generator</span><span class="p">(</span>
+            <span class="n">problem</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="n">BaseTestProblem</span><span class="p">,</span> <span class="n">X</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="n">bounds</span><span class="p">:</span> <span class="n">Any</span>
+        <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">            </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Generate outliers for the given problem.</span>
+
+<span class="sd">            Args:</span>
+<span class="sd">                problem: The test problem.</span>
+<span class="sd">                X: Input tensor.</span>
+<span class="sd">                bounds: Bounds for the input.</span>
+
+<span class="sd">            Returns:</span>
+<span class="sd">                A tensor of ones with the same shape as the input.</span>
+<span class="sd">            &quot;&quot;&quot;</span>
+            <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">X</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">outlier_generator</span> <span class="o">=</span> <span class="n">outlier_generator</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">rosenbrock_problem</span> <span class="o">=</span> <span class="n">CorruptedTestProblem</span><span class="p">(</span>
+            <span class="n">base_test_problem</span><span class="o">=</span><span class="n">Rosenbrock</span><span class="p">(),</span>
+            <span class="n">outlier_fraction</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span>
+            <span class="n">outlier_generator</span><span class="o">=</span><span class="n">outlier_generator</span><span class="p">,</span>
+            <span class="n">seeds</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">],</span>
+        <span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="MockPosterior">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MockPosterior">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MockPosterior</span><span class="p">(</span><span class="n">Posterior</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;This class is used to simulate a posterior with specified mean,</span>
+<span class="sd">    variance, and samples.</span>
+
+<span class="sd">    Everything is deterministic in this class.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">mean</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">variance</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">samples</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">base_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">batch_range</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Initialize the MockPosterior with specified attributes.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            mean: The mean of the posterior.</span>
+<span class="sd">            variance: The variance of the posterior.</span>
+<span class="sd">            samples: Samples to return from `rsample`,</span>
+<span class="sd">                unless `base_samples` is provided.</span>
+<span class="sd">            base_shape: If given, this is returned as `base_sample_shape`,</span>
+<span class="sd">                and also used as the base of the `_extended_shape`.</span>
+<span class="sd">            batch_range: If given, this is returned as `batch_range`.</span>
+<span class="sd">                Defaults to (0, -2).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_mean</span> <span class="o">=</span> <span class="n">mean</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_variance</span> <span class="o">=</span> <span class="n">variance</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_samples</span> <span class="o">=</span> <span class="n">samples</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_base_shape</span> <span class="o">=</span> <span class="n">base_shape</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_batch_range</span> <span class="o">=</span> <span class="n">batch_range</span> <span class="ow">or</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mi">2</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">device</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Return the device of the posterior.&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_mean</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_variance</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_samples</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">is_tensor</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">t</span><span class="o">.</span><span class="n">device</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s2">&quot;cpu&quot;</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dtype</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">dtype</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Return the data type of the posterior.&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_mean</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_variance</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_samples</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">is_tensor</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">t</span><span class="o">.</span><span class="n">dtype</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">float32</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">batch_shape</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Return the batch shape of the posterior.&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_mean</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_variance</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_samples</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">is_tensor</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
+                <span class="k">return</span> <span class="n">t</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span>  <span class="c1"># pragma: no cover</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_extended_shape</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">(),</span>  <span class="c1"># noqa: B008</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Return the extended shape of the posterior.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">sample_shape</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">base_sample_shape</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">base_sample_shape</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Return the base sample shape of the posterior.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_base_shape</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_base_shape</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_samples</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_samples</span><span class="o">.</span><span class="n">shape</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mean</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mean</span><span class="o">.</span><span class="n">shape</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_variance</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_variance</span><span class="o">.</span><span class="n">shape</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">()</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">batch_range</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Return the batch range of the posterior.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_batch_range</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">mean</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Return the mean of the posterior.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mean</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">variance</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Return the variance of the posterior.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_variance</span>
+
+<div class="viewcode-block" id="MockPosterior.rsample">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MockPosterior.rsample">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rsample</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return mock samples by extending the shape</span>
+<span class="sd">        of the initially specified samples.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            sample_shape: The shape of the samples to generate.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            A tensor of samples with the specified shape.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">sample_shape</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">sample_shape</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">()</span>
+        <span class="n">extended_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_extended_shape</span><span class="p">(</span><span class="n">sample_shape</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_samples</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">extended_shape</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="MockPosterior.rsample_from_base_samples">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MockPosterior.rsample_from_base_samples">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rsample_from_base_samples</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span>
+        <span class="n">base_samples</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">base_samples</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span> <span class="nb">len</span><span class="p">(</span><span class="n">sample_shape</span><span class="p">)]</span> <span class="o">!=</span> <span class="n">sample_shape</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
+                <span class="s2">&quot;`sample_shape` disagrees with shape of `base_samples`. &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;Got </span><span class="si">{</span><span class="n">sample_shape</span><span class="si">=}</span><span class="s2"> and </span><span class="si">{</span><span class="n">base_samples</span><span class="o">.</span><span class="n">shape</span><span class="si">=}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">rsample</span><span class="p">(</span><span class="n">sample_shape</span><span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="get_sampler_mock">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.get_sampler_mock">[docs]</a>
+<span class="nd">@GetSampler</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">MockPosterior</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_sampler_mock</span><span class="p">(</span>
+    <span class="n">posterior</span><span class="p">:</span> <span class="n">MockPosterior</span><span class="p">,</span> <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MCSampler</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get a `StochasticSampler` with the specified `sample_shape`.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        posterior: Used only for dispatching so that `get_sampler`</span>
+<span class="sd">            works with a `MockPosterior`.</span>
+<span class="sd">        sample_shape: The shape of the samples to generate.</span>
+<span class="sd">        kwargs: Passed to `StochasticSampler`</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A `StochasticSampler` for the mock posterior.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">StochasticSampler</span><span class="p">(</span><span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="MockModel">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MockModel">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MockModel</span><span class="p">(</span><span class="n">Model</span><span class="p">,</span> <span class="n">FantasizeMixin</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Mock ``Model`` that implements dummy methods and feeds through specified outputs.</span>
+
+<span class="sd">    Its ``posterior`` is a ``MockPosterior``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">posterior</span><span class="p">:</span> <span class="n">MockPosterior</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>  <span class="c1"># noqa: D107</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Initialize the MockModel with a specified posterior.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            posterior: The mock posterior to use for the model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">Model</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span> <span class="o">=</span> <span class="n">posterior</span>
+
+<div class="viewcode-block" id="MockModel.posterior">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MockModel.posterior">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">posterior</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">X</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">output_indices</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">posterior_transform</span><span class="p">:</span> <span class="n">PosteriorTransform</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">observation_noise</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MockPosterior</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Return the posterior of the model.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            X: Ignored; present for compatibility with super class.</span>
+<span class="sd">            output_indices: Ignored; present for compatibility with super class.</span>
+<span class="sd">            posterior_transform: Optional.</span>
+<span class="sd">            observation_noise: Ignored; present for compatibility with super class.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            The posterior of the model, possibly transformed.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">posterior_transform</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">posterior_transform</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">num_outputs</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Return the number of outputs of the model.&quot;&quot;&quot;</span>
+        <span class="n">extended_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">_extended_shape</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">extended_shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">extended_shape</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">batch_shape</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Return the batch shape of the model.&quot;&quot;&quot;</span>
+        <span class="n">extended_shape</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">_extended_shape</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">extended_shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span>
+
+<div class="viewcode-block" id="MockModel.state_dict">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MockModel.state_dict">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">state_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Dummy method, has no effect&quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+
+
+<div class="viewcode-block" id="MockModel.load_state_dict">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MockModel.load_state_dict">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">load_state_dict</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">state_dict</span><span class="p">:</span> <span class="n">OrderedDict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">strict</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Dummy method, has no effect.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            state_dict: The state dictionary to load.</span>
+<span class="sd">            strict: Whether to strictly enforce that the keys in state_dict match</span>
+<span class="sd">                the keys returned by this module&#39;s state_dict function.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="MockAcquisitionFunction">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MockAcquisitionFunction">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MockAcquisitionFunction</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Mock acquisition function object that implements dummy methods.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>  <span class="c1"># noqa: D107</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">model</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">X_pending</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">X</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">values</span>
+
+<div class="viewcode-block" id="MockAcquisitionFunction.set_X_pending">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.MockAcquisitionFunction.set_X_pending">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_X_pending</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X_pending</span><span class="p">:</span> <span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">X_pending</span> <span class="o">=</span> <span class="n">X_pending</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="get_random_data">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.get_random_data">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_random_data</span><span class="p">(</span>
+    <span class="n">batch_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span> <span class="n">m</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">d</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span> <span class="o">**</span><span class="n">tkwargs</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Generate random data for testing purposes.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        batch_shape: The batch shape of the data.</span>
+<span class="sd">        m: The number of outputs.</span>
+<span class="sd">        d: The dimension of the input.</span>
+<span class="sd">        n: The number of data points.</span>
+<span class="sd">        tkwargs: `device` and `dtype` tensor constructor kwargs.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A tuple `(train_X, train_Y)` with randomly generated training data.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">rep_shape</span> <span class="o">=</span> <span class="n">batch_shape</span> <span class="o">+</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span>
+    <span class="n">train_x</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
+        <span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.95</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="o">**</span><span class="n">tkwargs</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">d</span><span class="p">)],</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span>
+    <span class="p">)</span>
+    <span class="n">train_x</span> <span class="o">=</span> <span class="n">train_x</span> <span class="o">+</span> <span class="mf">0.05</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand_like</span><span class="p">(</span><span class="n">train_x</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">rep_shape</span><span class="p">)</span>
+    <span class="n">train_x</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+=</span> <span class="mf">0.02</span>  <span class="c1"># modify the first batch</span>
+    <span class="n">train_y</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">train_x</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="p">:</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span><span class="p">))</span>
+    <span class="n">train_y</span> <span class="o">=</span> <span class="n">train_y</span> <span class="o">+</span> <span class="mf">0.2</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="o">**</span><span class="n">tkwargs</span><span class="p">)</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">rep_shape</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">train_x</span><span class="p">,</span> <span class="n">train_y</span></div>
+
+
+
+<div class="viewcode-block" id="get_test_posterior">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.get_test_posterior">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_test_posterior</span><span class="p">(</span>
+    <span class="n">batch_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span>
+    <span class="n">q</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+    <span class="n">m</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+    <span class="n">interleaved</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">lazy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">independent</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">tkwargs</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">GPyTorchPosterior</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Generate a Posterior for testing purposes.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        batch_shape: The batch shape of the data.</span>
+<span class="sd">        q: The number of candidates</span>
+<span class="sd">        m: The number of outputs.</span>
+<span class="sd">        interleaved: A boolean indicating the format of the</span>
+<span class="sd">            MultitaskMultivariateNormal</span>
+<span class="sd">        lazy: A boolean indicating if the posterior should be lazy</span>
+<span class="sd">        independent: A boolean indicating whether the outputs are independent</span>
+<span class="sd">        tkwargs: `device` and `dtype` tensor constructor kwargs.</span>
+
+
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">independent</span><span class="p">:</span>
+        <span class="n">mvns</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">m</span><span class="p">):</span>
+            <span class="n">mean</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="n">q</span><span class="p">,</span> <span class="o">**</span><span class="n">tkwargs</span><span class="p">)</span>
+            <span class="n">a</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="n">q</span><span class="p">,</span> <span class="n">q</span><span class="p">,</span> <span class="o">**</span><span class="n">tkwargs</span><span class="p">)</span>
+            <span class="n">covar</span> <span class="o">=</span> <span class="n">a</span> <span class="o">@</span> <span class="n">a</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">2</span><span class="p">)</span>
+            <span class="n">flat_diag</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="n">q</span><span class="p">,</span> <span class="o">**</span><span class="n">tkwargs</span><span class="p">)</span>
+            <span class="n">covar</span> <span class="o">=</span> <span class="n">covar</span> <span class="o">+</span> <span class="n">torch</span><span class="o">.</span><span class="n">diag_embed</span><span class="p">(</span><span class="n">flat_diag</span><span class="p">)</span>
+            <span class="n">mvns</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">MultivariateNormal</span><span class="p">(</span><span class="n">mean</span><span class="p">,</span> <span class="n">covar</span><span class="p">))</span>
+        <span class="n">mtmvn</span> <span class="o">=</span> <span class="n">MultitaskMultivariateNormal</span><span class="o">.</span><span class="n">from_independent_mvns</span><span class="p">(</span><span class="n">mvns</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">mean</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="n">q</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="o">**</span><span class="n">tkwargs</span><span class="p">)</span>
+        <span class="n">a</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="n">q</span> <span class="o">*</span> <span class="n">m</span><span class="p">,</span> <span class="n">q</span> <span class="o">*</span> <span class="n">m</span><span class="p">,</span> <span class="o">**</span><span class="n">tkwargs</span><span class="p">)</span>
+        <span class="n">covar</span> <span class="o">=</span> <span class="n">a</span> <span class="o">@</span> <span class="n">a</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">flat_diag</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="o">*</span><span class="n">batch_shape</span><span class="p">,</span> <span class="n">q</span> <span class="o">*</span> <span class="n">m</span><span class="p">,</span> <span class="o">**</span><span class="n">tkwargs</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">lazy</span><span class="p">:</span>
+            <span class="n">covar</span> <span class="o">=</span> <span class="n">AddedDiagLinearOperator</span><span class="p">(</span><span class="n">covar</span><span class="p">,</span> <span class="n">DiagLinearOperator</span><span class="p">(</span><span class="n">flat_diag</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">covar</span> <span class="o">=</span> <span class="n">covar</span> <span class="o">+</span> <span class="n">torch</span><span class="o">.</span><span class="n">diag_embed</span><span class="p">(</span><span class="n">flat_diag</span><span class="p">)</span>
+        <span class="n">mtmvn</span> <span class="o">=</span> <span class="n">MultitaskMultivariateNormal</span><span class="p">(</span><span class="n">mean</span><span class="p">,</span> <span class="n">covar</span><span class="p">,</span> <span class="n">interleaved</span><span class="o">=</span><span class="n">interleaved</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">GPyTorchPosterior</span><span class="p">(</span><span class="n">mtmvn</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="get_max_violation_of_bounds">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.get_max_violation_of_bounds">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_max_violation_of_bounds</span><span class="p">(</span><span class="n">samples</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">bounds</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    The maximum value by which samples lie outside bounds.</span>
+
+<span class="sd">    A negative value indicates that all samples lie within bounds.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        samples: An `n x q x d` - dimension tensor, as might be returned from</span>
+<span class="sd">            `sample_q_batches_from_polytope`.</span>
+<span class="sd">        bounds: A `2 x d` tensor of lower and upper bounds for each column.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">n</span><span class="p">,</span> <span class="n">q</span><span class="p">,</span> <span class="n">d</span> <span class="o">=</span> <span class="n">samples</span><span class="o">.</span><span class="n">shape</span>
+    <span class="n">samples</span> <span class="o">=</span> <span class="n">samples</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="n">n</span> <span class="o">*</span> <span class="n">q</span><span class="p">,</span> <span class="n">d</span><span class="p">))</span>
+    <span class="n">lower</span> <span class="o">=</span> <span class="n">samples</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">values</span>
+    <span class="n">upper</span> <span class="o">=</span> <span class="n">samples</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">values</span>
+    <span class="n">lower_dist</span> <span class="o">=</span> <span class="p">(</span><span class="n">bounds</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="p">:]</span> <span class="o">-</span> <span class="n">lower</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+    <span class="n">upper_dist</span> <span class="o">=</span> <span class="p">(</span><span class="n">upper</span> <span class="o">-</span> <span class="n">bounds</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="p">:])</span><span class="o">.</span><span class="n">max</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="n">lower_dist</span><span class="p">,</span> <span class="n">upper_dist</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="get_max_violation_of_constraints">
+<a class="viewcode-back" href="../../../utils.html#botorch.utils.testing.get_max_violation_of_constraints">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_max_violation_of_constraints</span><span class="p">(</span>
+    <span class="n">samples</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+    <span class="n">constraints</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">equality</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Amount by which equality constraints are not obeyed.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        samples: An `n x q x d` - dimension tensor, as might be returned from</span>
+<span class="sd">            `sample_q_batches_from_polytope`.</span>
+<span class="sd">        constraints: A list of tuples (indices, coefficients, rhs),</span>
+<span class="sd">            with each tuple encoding an inequality constraint of the form</span>
+<span class="sd">            `\sum_i (X[indices[i]] * coefficients[i]) = rhs`, or `&gt;=` if</span>
+<span class="sd">            `equality` is False.</span>
+<span class="sd">        equality: Whether these are equality constraints (not inequality).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">n</span><span class="p">,</span> <span class="n">q</span><span class="p">,</span> <span class="n">d</span> <span class="o">=</span> <span class="n">samples</span><span class="o">.</span><span class="n">shape</span>
+    <span class="n">max_error</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">if</span> <span class="n">constraints</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">ind</span><span class="p">,</span> <span class="n">coef</span><span class="p">,</span> <span class="n">rhs</span> <span class="ow">in</span> <span class="n">constraints</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">ind</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">constr</span> <span class="o">=</span> <span class="n">samples</span><span class="p">[:,</span> <span class="p">:,</span> <span class="n">ind</span><span class="p">]</span> <span class="o">@</span> <span class="n">coef</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">constr</span> <span class="o">=</span> <span class="n">samples</span><span class="p">[:,</span> <span class="n">ind</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">ind</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]]</span> <span class="o">@</span> <span class="n">coef</span>
+
+            <span class="k">if</span> <span class="n">equality</span><span class="p">:</span>
+                <span class="n">error</span> <span class="o">=</span> <span class="p">(</span><span class="n">constr</span> <span class="o">-</span> <span class="n">rhs</span><span class="p">)</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">error</span> <span class="o">=</span> <span class="p">(</span><span class="n">rhs</span> <span class="o">-</span> <span class="n">constr</span><span class="p">)</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+            <span class="n">max_error</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">max_error</span><span class="p">,</span> <span class="n">error</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">max_error</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p></p>
+  </div>
+
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

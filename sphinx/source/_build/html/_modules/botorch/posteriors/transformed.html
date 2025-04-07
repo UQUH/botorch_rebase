@@ -1,0 +1,265 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>botorch.posteriors.transformed &mdash; BoTorch  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=ca3e82f4" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            BoTorch
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../acquisition.html">botorch.acquisition</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../models.html">botorch.models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../generation.html">botorch.generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../posteriors.html">botorch.posteriors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../optim.html">botorch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../fit.html">botorch.fit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../sampling.html">botorch.sampling</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cross_validation.html">botorch.cross_validation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../settings.html">botorch.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../logging.html">botorch.logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../test_functions.html">botorch.test_functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../test_utils.html">botorch.test_utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../exceptions.html">botorch.exceptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../utils.html">botorch.utils</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">BoTorch</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">botorch.posteriors.transformed</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for botorch.posteriors.transformed</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Copyright (c) Meta Platforms, Inc. and affiliates.</span>
+<span class="c1">#</span>
+<span class="c1"># This source code is licensed under the MIT license found in the</span>
+<span class="c1"># LICENSE file in the root directory of this source tree.</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.posteriors.posterior</span><span class="w"> </span><span class="kn">import</span> <span class="n">Posterior</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tensor</span>
+
+
+<div class="viewcode-block" id="TransformedPosterior">
+<a class="viewcode-back" href="../../../posteriors.html#botorch.posteriors.transformed.TransformedPosterior">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">TransformedPosterior</span><span class="p">(</span><span class="n">Posterior</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;A generic transformation of a posterior (implicitly represented).&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">posterior</span><span class="p">:</span> <span class="n">Posterior</span><span class="p">,</span>
+        <span class="n">sample_transform</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Tensor</span><span class="p">],</span> <span class="n">Tensor</span><span class="p">],</span>
+        <span class="n">mean_transform</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">],</span> <span class="n">Tensor</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">variance_transform</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">],</span> <span class="n">Tensor</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;An implicitly represented transformed posterior.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            posterior: The posterior object to be transformed.</span>
+<span class="sd">            sample_transform: A callable applying a sample-level transform to a</span>
+<span class="sd">                `sample_shape x batch_shape x q x m`-dim tensor of samples from</span>
+<span class="sd">                the original posterior, returning a tensor of samples of the</span>
+<span class="sd">                same shape.</span>
+<span class="sd">            mean_transform: A callable transforming a 2-tuple of mean and</span>
+<span class="sd">                variance (both of shape `batch_shape x m x o`) of the original</span>
+<span class="sd">                posterior to the mean of the transformed posterior.</span>
+<span class="sd">            variance_transform: A callable transforming a 2-tuple of mean and</span>
+<span class="sd">                variance (both of shape `batch_shape x m x o`) of the original</span>
+<span class="sd">                posterior to a variance of the transformed posterior.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span> <span class="o">=</span> <span class="n">posterior</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sample_transform</span> <span class="o">=</span> <span class="n">sample_transform</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_mean_transform</span> <span class="o">=</span> <span class="n">mean_transform</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_variance_transform</span> <span class="o">=</span> <span class="n">variance_transform</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">base_sample_shape</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;The shape of a base sample used for constructing posterior samples.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">base_sample_shape</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">batch_range</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;The t-batch range.</span>
+
+<span class="sd">        This is used in samplers to identify the t-batch component of the</span>
+<span class="sd">        `base_sample_shape`. The base samples are expanded over the t-batches to</span>
+<span class="sd">        provide consistency in the acquisition values, i.e., to ensure that a</span>
+<span class="sd">        candidate produces same value regardless of its position on the t-batch.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">batch_range</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">device</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;The torch device of the posterior.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">device</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">dtype</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">dtype</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;The torch dtype of the posterior.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">dtype</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_extended_shape</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">(),</span>  <span class="c1"># noqa: B008</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Returns the shape of the samples produced by the posterior with</span>
+<span class="sd">        the given `sample_shape`.</span>
+
+<span class="sd">        NOTE: This assumes that the `sample_transform` does not change the</span>
+<span class="sd">        shape of the samples.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">_extended_shape</span><span class="p">(</span><span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">mean</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;The mean of the posterior as a `batch_shape x n x m`-dim Tensor.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mean_transform</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;No mean transform provided.&quot;</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">variance</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">variance</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">NotImplementedError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+            <span class="n">variance</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mean_transform</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">mean</span><span class="p">,</span> <span class="n">variance</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">variance</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;The variance of the posterior as a `batch_shape x n x m`-dim Tensor.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_variance_transform</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;No variance transform provided.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_variance_transform</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">mean</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">variance</span><span class="p">)</span>
+
+<div class="viewcode-block" id="TransformedPosterior.rsample_from_base_samples">
+<a class="viewcode-back" href="../../../posteriors.html#botorch.posteriors.transformed.TransformedPosterior.rsample_from_base_samples">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rsample_from_base_samples</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span>
+        <span class="n">base_samples</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Sample from the posterior (with gradients) using base samples.</span>
+
+<span class="sd">        This is intended to be used with a sampler that produces the corresponding base</span>
+<span class="sd">        samples, and enables acquisition optimization via Sample Average Approximation.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            sample_shape: A `torch.Size` object specifying the sample shape. To</span>
+<span class="sd">                draw `n` samples, set to `torch.Size([n])`. To draw `b` batches</span>
+<span class="sd">                of `n` samples each, set to `torch.Size([b, n])`.</span>
+<span class="sd">            base_samples: The base samples, obtained from the appropriate sampler.</span>
+<span class="sd">                This is a tensor of shape `sample_shape x base_sample_shape`.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Samples from the posterior, a tensor of shape</span>
+<span class="sd">            `self._extended_shape(sample_shape=sample_shape)`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">samples</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">rsample_from_base_samples</span><span class="p">(</span>
+            <span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">,</span> <span class="n">base_samples</span><span class="o">=</span><span class="n">base_samples</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sample_transform</span><span class="p">(</span><span class="n">samples</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="TransformedPosterior.rsample">
+<a class="viewcode-back" href="../../../posteriors.html#botorch.posteriors.transformed.TransformedPosterior.rsample">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rsample</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Sample from the posterior (with gradients).</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            sample_shape: A `torch.Size` object specifying the sample shape. To</span>
+<span class="sd">                draw `n` samples, set to `torch.Size([n])`. To draw `b` batches</span>
+<span class="sd">                of `n` samples each, set to `torch.Size([b, n])`.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Samples from the posterior, a tensor of shape</span>
+<span class="sd">            `self._extended_shape(sample_shape=sample_shape)`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">samples</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_posterior</span><span class="o">.</span><span class="n">rsample</span><span class="p">(</span><span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_sample_transform</span><span class="p">(</span><span class="n">samples</span><span class="p">)</span></div>
+</div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p></p>
+  </div>
+
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,345 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>botorch.sampling.pathwise.utils.mixins &mdash; BoTorch  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/custom.css?v=ca3e82f4" />
+
+  
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            BoTorch
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../acquisition.html">botorch.acquisition</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../models.html">botorch.models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../generation.html">botorch.generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../posteriors.html">botorch.posteriors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../optim.html">botorch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../fit.html">botorch.fit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../sampling.html">botorch.sampling</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../cross_validation.html">botorch.cross_validation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../settings.html">botorch.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../logging.html">botorch.logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../test_functions.html">botorch.test_functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../test_utils.html">botorch.test_utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../exceptions.html">botorch.exceptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../utils.html">botorch.utils</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">BoTorch</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">botorch.sampling.pathwise.utils.mixins</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for botorch.sampling.pathwise.utils.mixins</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Copyright (c) Meta Platforms, Inc. and affiliates.</span>
+<span class="c1">#</span>
+<span class="c1"># This source code is licensed under the MIT license found in the</span>
+<span class="c1"># LICENSE file in the root directory of this source tree.</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">ABC</span><span class="p">,</span> <span class="n">abstractmethod</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">Any</span><span class="p">,</span>
+    <span class="n">Callable</span><span class="p">,</span>
+    <span class="n">Generic</span><span class="p">,</span>
+    <span class="n">Iterable</span><span class="p">,</span>
+    <span class="n">Iterator</span><span class="p">,</span>
+    <span class="n">Mapping</span><span class="p">,</span>
+    <span class="n">Optional</span><span class="p">,</span>
+    <span class="n">Tuple</span><span class="p">,</span>
+    <span class="n">TypeVar</span><span class="p">,</span>
+    <span class="n">Union</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.models.transforms.input</span><span class="w"> </span><span class="kn">import</span> <span class="n">InputTransform</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.models.transforms.outcome</span><span class="w"> </span><span class="kn">import</span> <span class="n">OutcomeTransform</span>
+
+<span class="c1"># from botorch.utils.types import cast</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tensor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch.nn</span><span class="w"> </span><span class="kn">import</span> <span class="n">Module</span><span class="p">,</span> <span class="n">ModuleDict</span><span class="p">,</span> <span class="n">ModuleList</span>
+
+<span class="c1"># Generic type variable for module types</span>
+<span class="n">T</span> <span class="o">=</span> <span class="n">TypeVar</span><span class="p">(</span><span class="s2">&quot;T&quot;</span><span class="p">)</span>  <span class="c1"># generic type variable</span>
+<span class="n">TModule</span> <span class="o">=</span> <span class="n">TypeVar</span><span class="p">(</span><span class="s2">&quot;TModule&quot;</span><span class="p">,</span> <span class="n">bound</span><span class="o">=</span><span class="n">Module</span><span class="p">)</span>  <span class="c1"># must be a Module subclass</span>
+<span class="n">TInputTransform</span> <span class="o">=</span> <span class="n">Union</span><span class="p">[</span><span class="n">InputTransform</span><span class="p">,</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Tensor</span><span class="p">],</span> <span class="n">Tensor</span><span class="p">]]</span>
+<span class="n">TOutputTransform</span> <span class="o">=</span> <span class="n">Union</span><span class="p">[</span><span class="n">OutcomeTransform</span><span class="p">,</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Tensor</span><span class="p">],</span> <span class="n">Tensor</span><span class="p">]]</span>
+
+
+<div class="viewcode-block" id="TransformedModuleMixin">
+<a class="viewcode-back" href="../../../../../sampling.html#botorch.sampling.pathwise.utils.TransformedModuleMixin">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">TransformedModuleMixin</span><span class="p">(</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Mixin that wraps a module&#39;s __call__ method with optional transforms.</span>
+
+<span class="sd">    This mixin provides functionality to transform inputs before processing and outputs</span>
+<span class="sd">    after processing. It inherits from Module to ensure proper PyTorch module behavior</span>
+<span class="sd">    and requires subclasses to implement the forward method.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        input_transform: Optional transform applied to input values before forward pass</span>
+<span class="sd">        output_transform: Optional transform applied to output values after forward pass</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">input_transform</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">TInputTransform</span><span class="p">]</span>
+    <span class="n">output_transform</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">TOutputTransform</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the TransformedModuleMixin with default transforms.&quot;&quot;&quot;</span>
+        <span class="c1"># Initialize Module first to ensure proper PyTorch behavior</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input_transform</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_transform</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">values</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+        <span class="c1"># Apply input transform if present</span>
+        <span class="n">input_transform</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;input_transform&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">input_transform</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">values</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">input_transform</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">values</span><span class="p">)</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">input_transform</span><span class="p">,</span> <span class="n">InputTransform</span><span class="p">)</span>
+                <span class="k">else</span> <span class="n">input_transform</span><span class="p">(</span><span class="n">values</span><span class="p">)</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Call forward() - bypassing super().__call__ to implement interface</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">values</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+        <span class="c1"># Apply output transform if present</span>
+        <span class="n">output_transform</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;output_transform&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">output_transform</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">output</span>
+
+        <span class="k">return</span> <span class="p">(</span>
+            <span class="n">output_transform</span><span class="o">.</span><span class="n">untransform</span><span class="p">(</span><span class="n">output</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">output_transform</span><span class="p">,</span> <span class="n">OutcomeTransform</span><span class="p">)</span>
+            <span class="k">else</span> <span class="n">output_transform</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+        <span class="p">)</span>
+
+<div class="viewcode-block" id="TransformedModuleMixin.forward">
+<a class="viewcode-back" href="../../../../../sampling.html#botorch.sampling.pathwise.utils.TransformedModuleMixin.forward">[docs]</a>
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">values</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Abstract method that must be implemented by subclasses.</span>
+
+<span class="sd">        This enforces the PyTorch pattern of implementing computation in forward().</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="ModuleDictMixin">
+<a class="viewcode-back" href="../../../../../sampling.html#botorch.sampling.pathwise.utils.ModuleDictMixin">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ModuleDictMixin</span><span class="p">(</span><span class="n">ABC</span><span class="p">,</span> <span class="n">Generic</span><span class="p">[</span><span class="n">TModule</span><span class="p">]):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Mixin that provides dictionary-like access to a ModuleDict.</span>
+
+<span class="sd">    This mixin allows a class to behave like a dictionary of modules while ensuring</span>
+<span class="sd">    proper PyTorch module registration and parameter tracking. It uses a unique name</span>
+<span class="sd">    for the underlying ModuleDict to avoid attribute conflicts.</span>
+
+<span class="sd">    Type Args:</span>
+<span class="sd">        TModule: The type of modules stored in the dictionary (must be Module subclass)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attr_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">modules</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">TModule</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Initialize ModuleDictMixin.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            attr_name: Base name for the ModuleDict attribute</span>
+<span class="sd">            modules: Optional initial mapping of module names to modules</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Use a unique name to avoid conflicts with existing attributes</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__module_dict_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;_</span><span class="si">{</span><span class="n">attr_name</span><span class="si">}</span><span class="s2">_dict&quot;</span>
+        <span class="c1"># Create and register the ModuleDict</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">register_module</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__module_dict_name</span><span class="p">,</span> <span class="n">ModuleDict</span><span class="p">({}</span> <span class="k">if</span> <span class="n">modules</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">modules</span><span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">__module_dict</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ModuleDict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Access the underlying ModuleDict using the unique name.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">__module_dict_name</span><span class="p">)</span>
+
+    <span class="c1"># Dictionary interface methods</span>
+<div class="viewcode-block" id="ModuleDictMixin.items">
+<a class="viewcode-back" href="../../../../../sampling.html#botorch.sampling.pathwise.utils.ModuleDictMixin.items">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">items</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">TModule</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return (key, value) pairs of the dictionary.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__module_dict</span><span class="o">.</span><span class="n">items</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="ModuleDictMixin.keys">
+<a class="viewcode-back" href="../../../../../sampling.html#botorch.sampling.pathwise.utils.ModuleDictMixin.keys">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">keys</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return keys of the dictionary.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__module_dict</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="ModuleDictMixin.values">
+<a class="viewcode-back" href="../../../../../sampling.html#botorch.sampling.pathwise.utils.ModuleDictMixin.values">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">values</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">TModule</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return values of the dictionary.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__module_dict</span><span class="o">.</span><span class="n">values</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="ModuleDictMixin.update">
+<a class="viewcode-back" href="../../../../../sampling.html#botorch.sampling.pathwise.utils.ModuleDictMixin.update">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">modules</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">TModule</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Update the dictionary with new modules.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__module_dict</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">modules</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return number of modules in the dictionary.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__module_dict</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterator</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Iterate over module names.&quot;&quot;&quot;</span>
+        <span class="k">yield from</span> <span class="bp">self</span><span class="o">.</span><span class="n">__module_dict</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__delitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Delete a module by name.&quot;&quot;&quot;</span>
+        <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">__module_dict</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TModule</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get a module by name.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__module_dict</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__setitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">val</span><span class="p">:</span> <span class="n">TModule</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set a module by name.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__module_dict</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span></div>
+
+
+
+<div class="viewcode-block" id="ModuleListMixin">
+<a class="viewcode-back" href="../../../../../sampling.html#botorch.sampling.pathwise.utils.ModuleListMixin">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">ModuleListMixin</span><span class="p">(</span><span class="n">ABC</span><span class="p">,</span> <span class="n">Generic</span><span class="p">[</span><span class="n">TModule</span><span class="p">]):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Mixin that provides list-like access to a ModuleList.</span>
+
+<span class="sd">    This mixin allows a class to behave like a list of modules while ensuring</span>
+<span class="sd">    proper PyTorch module registration and parameter tracking. It uses a unique name</span>
+<span class="sd">    for the underlying ModuleList to avoid attribute conflicts.</span>
+
+<span class="sd">    Type Args:</span>
+<span class="sd">        TModule: The type of modules stored in the list (must be Module subclass)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attr_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">modules</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Iterable</span><span class="p">[</span><span class="n">TModule</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Initialize ModuleListMixin.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            attr_name: Base name for the ModuleList attribute</span>
+<span class="sd">            modules: Optional initial iterable of modules</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># Use a unique name to avoid conflicts with existing attributes</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__module_list_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;_</span><span class="si">{</span><span class="n">attr_name</span><span class="si">}</span><span class="s2">_list&quot;</span>
+        <span class="c1"># Create and register the ModuleList</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">register_module</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">__module_list_name</span><span class="p">,</span> <span class="n">ModuleList</span><span class="p">([]</span> <span class="k">if</span> <span class="n">modules</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">modules</span><span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">__module_list</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ModuleList</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Access the underlying ModuleList using the unique name.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">__module_list_name</span><span class="p">)</span>
+
+    <span class="c1"># List interface methods</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__len__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return number of modules in the list.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__module_list</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Iterator</span><span class="p">[</span><span class="n">TModule</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Iterate over modules.&quot;&quot;&quot;</span>
+        <span class="k">yield from</span> <span class="bp">self</span><span class="o">.</span><span class="n">__module_list</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__delitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Delete a module by index.&quot;&quot;&quot;</span>
+        <span class="k">del</span> <span class="bp">self</span><span class="o">.</span><span class="n">__module_list</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__getitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TModule</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get a module by index.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">__module_list</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__setitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">val</span><span class="p">:</span> <span class="n">TModule</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set a module by index.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__module_list</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p></p>
+  </div>
+
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

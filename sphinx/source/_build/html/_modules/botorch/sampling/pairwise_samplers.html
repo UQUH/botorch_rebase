@@ -1,0 +1,247 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>botorch.sampling.pairwise_samplers &mdash; BoTorch  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=ca3e82f4" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            BoTorch
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../acquisition.html">botorch.acquisition</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../models.html">botorch.models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../generation.html">botorch.generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../posteriors.html">botorch.posteriors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../optim.html">botorch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../fit.html">botorch.fit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../sampling.html">botorch.sampling</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cross_validation.html">botorch.cross_validation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../settings.html">botorch.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../logging.html">botorch.logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../test_functions.html">botorch.test_functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../test_utils.html">botorch.test_utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../exceptions.html">botorch.exceptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../utils.html">botorch.utils</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">BoTorch</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">botorch.sampling.pairwise_samplers</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for botorch.sampling.pairwise_samplers</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Copyright (c) Meta Platforms, Inc. and affiliates.</span>
+<span class="c1">#</span>
+<span class="c1"># This source code is licensed under the MIT license found in the</span>
+<span class="c1"># LICENSE file in the root directory of this source tree.</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">itertools</span><span class="w"> </span><span class="kn">import</span> <span class="n">combinations</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.posteriors.posterior</span><span class="w"> </span><span class="kn">import</span> <span class="n">Posterior</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">MCSampler</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.normal</span><span class="w"> </span><span class="kn">import</span> <span class="n">IIDNormalSampler</span><span class="p">,</span> <span class="n">SobolQMCNormalSampler</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tensor</span>
+
+
+<div class="viewcode-block" id="PairwiseMCSampler">
+<a class="viewcode-back" href="../../../sampling.html#botorch.sampling.pairwise_samplers.PairwiseMCSampler">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">PairwiseMCSampler</span><span class="p">(</span><span class="n">MCSampler</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Abstract class for Pairwise MC Sampler.</span>
+
+<span class="sd">    This sampler will sample pairwise comparisons. It is to be used together</span>
+<span class="sd">    with PairwiseGP and BoTorch acquisition functions (e.g., qKnowledgeGradient)</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">max_num_comparisons</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            max_num_comparisons: Max number of comparisons drawn within samples.</span>
+<span class="sd">                If None, use all possible pairwise comparisons</span>
+<span class="sd">            seed: The seed for np.random.seed. If omitted, use a random seed.</span>
+<span class="sd">                May be overwritten by sibling classes or subclasses.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_num_comparisons</span> <span class="o">=</span> <span class="n">max_num_comparisons</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">seed</span> <span class="o">=</span> <span class="n">seed</span> <span class="k">if</span> <span class="n">seed</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">torch</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1000000</span><span class="p">,</span> <span class="p">(</span><span class="mi">1</span><span class="p">,))</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+
+<div class="viewcode-block" id="PairwiseMCSampler.forward">
+<a class="viewcode-back" href="../../../sampling.html#botorch.sampling.pairwise_samplers.PairwiseMCSampler.forward">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">posterior</span><span class="p">:</span> <span class="n">Posterior</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Draws MC samples from the posterior and make comparisons</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            posterior: The Posterior to sample from.</span>
+<span class="sd">                The returned samples are expected to have output dimension of 1.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Posterior sample pairwise comparisons.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">samples</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">seed</span><span class="p">)</span>
+
+        <span class="n">s_n</span> <span class="o">=</span> <span class="n">samples</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span>  <span class="c1"># candidate number per batch</span>
+        <span class="k">if</span> <span class="n">s_n</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Number of samples &lt; 2, cannot make comparisons&quot;</span><span class="p">)</span>
+
+        <span class="c1"># TODO: Don&#39;t instantiate a generator</span>
+        <span class="n">all_pairs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">combinations</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">s_n</span><span class="p">),</span> <span class="mi">2</span><span class="p">)))</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_num_comparisons</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">comp_n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">all_pairs</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">comp_n</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">max_num_comparisons</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">all_pairs</span><span class="p">))</span>
+
+        <span class="n">comp_pairs</span> <span class="o">=</span> <span class="n">all_pairs</span><span class="p">[</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">all_pairs</span><span class="p">)),</span> <span class="n">comp_n</span><span class="p">,</span> <span class="n">replace</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">s_comps_size</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">((</span><span class="o">*</span><span class="n">samples</span><span class="o">.</span><span class="n">shape</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">],</span> <span class="n">comp_n</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+        <span class="n">s_v</span> <span class="o">=</span> <span class="n">samples</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">s_n</span><span class="p">)</span>
+
+        <span class="n">idx1</span><span class="p">,</span> <span class="n">idx2</span> <span class="o">=</span> <span class="n">comp_pairs</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">comp_pairs</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span>
+        <span class="n">prefs</span> <span class="o">=</span> <span class="p">(</span><span class="n">s_v</span><span class="p">[:,</span> <span class="n">idx1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">s_v</span><span class="p">[:,</span> <span class="n">idx2</span><span class="p">])</span><span class="o">.</span><span class="n">long</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>
+        <span class="n">cpt</span> <span class="o">=</span> <span class="n">comp_pairs</span><span class="o">.</span><span class="n">T</span>
+        <span class="n">c1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">choose</span><span class="p">(</span><span class="n">prefs</span><span class="p">,</span> <span class="n">cpt</span><span class="p">)</span>
+        <span class="n">c2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">choose</span><span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">prefs</span><span class="p">,</span> <span class="n">cpt</span><span class="p">)</span>
+        <span class="n">s_comps</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">c1</span><span class="p">,</span> <span class="n">c2</span><span class="p">],</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">s_comps_size</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">s_comps</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="PairwiseIIDNormalSampler">
+<a class="viewcode-back" href="../../../sampling.html#botorch.sampling.pairwise_samplers.PairwiseIIDNormalSampler">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">PairwiseIIDNormalSampler</span><span class="p">(</span><span class="n">PairwiseMCSampler</span><span class="p">,</span> <span class="n">IIDNormalSampler</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span>
+        <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">max_num_comparisons</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            sample_shape: The `sample_shape` of the samples to generate.</span>
+<span class="sd">            seed: The seed for the RNG. If omitted, use a random seed.</span>
+<span class="sd">            max_num_comparisons:  Max number of comparisons drawn within samples.</span>
+<span class="sd">                If None, use all possible pairwise comparisons.</span>
+<span class="sd">            kwargs: Catch-all for deprecated arguments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">PairwiseMCSampler</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
+            <span class="bp">self</span><span class="p">,</span> <span class="n">max_num_comparisons</span><span class="o">=</span><span class="n">max_num_comparisons</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span>
+        <span class="p">)</span>
+        <span class="n">IIDNormalSampler</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="PairwiseSobolQMCNormalSampler">
+<a class="viewcode-back" href="../../../sampling.html#botorch.sampling.pairwise_samplers.PairwiseSobolQMCNormalSampler">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">PairwiseSobolQMCNormalSampler</span><span class="p">(</span><span class="n">PairwiseMCSampler</span><span class="p">,</span> <span class="n">SobolQMCNormalSampler</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span>
+        <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">max_num_comparisons</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            sample_shape: The `sample_shape` of the samples to generate.</span>
+<span class="sd">            seed: The seed for the RNG. If omitted, use a random seed.</span>
+<span class="sd">            max_num_comparisons:  Max number of comparisons drawn within samples.</span>
+<span class="sd">                If None, use all possible pairwise comparisons.</span>
+<span class="sd">            kwargs: Catch-all for deprecated arguments.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">PairwiseMCSampler</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
+            <span class="bp">self</span><span class="p">,</span> <span class="n">max_num_comparisons</span><span class="o">=</span><span class="n">max_num_comparisons</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span>
+        <span class="p">)</span>
+        <span class="n">SobolQMCNormalSampler</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
+            <span class="bp">self</span><span class="p">,</span> <span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+        <span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p></p>
+  </div>
+
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

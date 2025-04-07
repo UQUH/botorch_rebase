@@ -1,0 +1,444 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>botorch.sampling.pathwise.features.generators &mdash; BoTorch  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../../../_static/custom.css?v=ca3e82f4" />
+
+  
+      <script src="../../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../../index.html" class="icon icon-home">
+            BoTorch
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../acquisition.html">botorch.acquisition</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../models.html">botorch.models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../generation.html">botorch.generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../posteriors.html">botorch.posteriors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../optim.html">botorch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../fit.html">botorch.fit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../sampling.html">botorch.sampling</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../cross_validation.html">botorch.cross_validation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../settings.html">botorch.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../logging.html">botorch.logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../test_functions.html">botorch.test_functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../test_utils.html">botorch.test_utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../exceptions.html">botorch.exceptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../../utils.html">botorch.utils</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../../index.html">BoTorch</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">botorch.sampling.pathwise.features.generators</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for botorch.sampling.pathwise.features.generators</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Copyright (c) Meta Platforms, Inc. and affiliates.</span>
+<span class="c1">#</span>
+<span class="c1"># This source code is licensed under the MIT license found in the</span>
+<span class="c1"># LICENSE file in the root directory of this source tree.</span>
+
+<span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">.. [rahimi2007random]</span>
+<span class="sd">    A. Rahimi and B. Recht. Random features for large-scale kernel machines.</span>
+<span class="sd">    Advances in Neural Information Processing Systems 20 (2007).</span>
+
+<span class="sd">.. [sutherland2015error]</span>
+<span class="sd">    D. J. Sutherland and J. Schneider. On the error of random Fourier features.</span>
+<span class="sd">    arXiv preprint arXiv:1506.02785 (2015).</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Optional</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.exceptions.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">UnsupportedError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.pathwise.features.maps</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">DirectSumFeatureMap</span><span class="p">,</span>
+    <span class="n">FourierFeatureMap</span><span class="p">,</span>
+    <span class="n">IndexKernelFeatureMap</span><span class="p">,</span>
+    <span class="n">KernelFeatureMap</span><span class="p">,</span>
+    <span class="n">LinearKernelFeatureMap</span><span class="p">,</span>
+    <span class="n">MultitaskKernelFeatureMap</span><span class="p">,</span>
+    <span class="n">OuterProductFeatureMap</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.pathwise.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_kernel_num_inputs</span><span class="p">,</span> <span class="n">transforms</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.utils.dispatcher</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dispatcher</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.utils.sampling</span><span class="w"> </span><span class="kn">import</span> <span class="n">draw_sobol_normal_samples</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gpytorch</span><span class="w"> </span><span class="kn">import</span> <span class="n">kernels</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">Size</span><span class="p">,</span> <span class="n">Tensor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch.distributions</span><span class="w"> </span><span class="kn">import</span> <span class="n">Gamma</span>
+
+<span class="c1"># IMPLEMENTATION NOTE: This type definition specifies the interface for feature map</span>
+<span class="c1"># generators.</span>
+<span class="c1"># It defines a callable that takes a kernel and dimension parameters and returns a</span>
+<span class="c1"># KernelFeatureMap.</span>
+<span class="n">TKernelFeatureMapGenerator</span> <span class="o">=</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">kernels</span><span class="o">.</span><span class="n">Kernel</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">KernelFeatureMap</span><span class="p">]</span>
+
+<span class="c1"># IMPLEMENTATION NOTE: We use a Dispatcher pattern to register different handlers for</span>
+<span class="c1"># various</span>
+<span class="c1"># kernel types. This allows for extensibility - new kernel types can be supported by</span>
+<span class="c1"># adding</span>
+<span class="c1"># new handler functions registered to this dispatcher.</span>
+<span class="n">GenKernelFeatureMap</span> <span class="o">=</span> <span class="n">Dispatcher</span><span class="p">(</span><span class="s2">&quot;gen_kernel_feature_map&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="gen_kernel_feature_map">
+<a class="viewcode-back" href="../../../../../sampling.html#botorch.sampling.pathwise.features.generators.gen_kernel_feature_map">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">gen_kernel_feature_map</span><span class="p">(</span>
+    <span class="n">kernel</span><span class="p">:</span> <span class="n">kernels</span><span class="o">.</span><span class="n">Kernel</span><span class="p">,</span>
+    <span class="n">num_random_features</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1024</span><span class="p">,</span>
+    <span class="n">num_ambient_inputs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KernelFeatureMap</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Generates a feature map :math:`\phi: \mathcal{X} \to \mathbb{R}^{n}` such that</span>
+<span class="sd">    :math:`k(x, x&#39;) ≈ \phi(x)^{T} \phi(x&#39;)`. For stationary kernels :math:`k`, defaults</span>
+<span class="sd">    to the method of random Fourier features. For more details, see [rahimi2007random]_</span>
+<span class="sd">    and [sutherland2015error]_.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        kernel: The kernel :math:`k` to be represented via a feature map.</span>
+<span class="sd">        num_random_features: The number of random features used to estimate kernels</span>
+<span class="sd">            that cannot be exactly represented as finite-dimensional feature maps.</span>
+<span class="sd">        num_ambient_inputs: The number of ambient input features. Typically acts as a</span>
+<span class="sd">            required argument for kernels with lengthscales whose :code:`active_dims`</span>
+<span class="sd">            and :code:`ard_num_dims` attributes are both None.</span>
+<span class="sd">        **kwargs: Additional keyword arguments are passed to subroutines.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># IMPLEMENTATION NOTE: This function serves as the main entry point for generating</span>
+    <span class="c1"># feature maps from kernels. It uses the dispatcher to call the appropriate handler</span>
+    <span class="c1"># based on the kernel type. The function has been updated from the original</span>
+    <span class="c1"># implementation</span>
+    <span class="c1"># to use more descriptive parameter names (num_ambient_inputs instead of num_inputs,</span>
+    <span class="c1"># and num_random_features instead of num_outputs) to better reflect their purpose.</span>
+    <span class="k">return</span> <span class="n">GenKernelFeatureMap</span><span class="p">(</span>
+        <span class="n">kernel</span><span class="p">,</span>
+        <span class="n">num_ambient_inputs</span><span class="o">=</span><span class="n">num_ambient_inputs</span><span class="p">,</span>
+        <span class="n">num_random_features</span><span class="o">=</span><span class="n">num_random_features</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">)</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_gen_fourier_features</span><span class="p">(</span>
+    <span class="n">kernel</span><span class="p">:</span> <span class="n">kernels</span><span class="o">.</span><span class="n">Kernel</span><span class="p">,</span>
+    <span class="n">weight_generator</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Size</span><span class="p">],</span> <span class="n">Tensor</span><span class="p">],</span>
+    <span class="n">num_random_features</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="n">num_inputs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">random_feature_scale</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">cosine_only</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">ignore</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">FourierFeatureMap</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Generate a feature map :math:`\phi: \mathcal{X} \to \mathbb{R}^{2l}` that</span>
+<span class="sd">    approximates a stationary kernel so that :math:`k(x, x&#39;) ≈ \phi(x)^\top \phi(x&#39;)`.</span>
+
+<span class="sd">    Following [sutherland2015error]_, we default to representing complex exponentials</span>
+<span class="sd">    by pairs of basis functions :math:`\phi_{i}(x) = \sin(x^\top w_{i})` and</span>
+<span class="sd">    :math:`\phi_{i + l} = \cos(x^\top w_{i}).</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        kernel: A stationary kernel :math:`k(x, x&#39;) = k(x - x&#39;)`.</span>
+<span class="sd">        weight_generator: A callable used to generate weight vectors :math:`w`.</span>
+<span class="sd">        num_inputs: The number of ambient input features.</span>
+<span class="sd">        num_random_features: The number of random Fourier features.</span>
+<span class="sd">        random_feature_scale: Multiplicative constant for the feature map :math:`\phi`.</span>
+<span class="sd">            Defaults to :code:`num_random_features ** -0.5` so that</span>
+<span class="sd">            :math:`\phi(x)^\top \phi(x&#39;) ≈ k(x, x&#39;)`.</span>
+<span class="sd">        cosine_only: Specifies whether or not to use cosine features with a random</span>
+<span class="sd">            phase instead of paired sine and cosine features.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># IMPLEMENTATION NOTE: This function implements the random Fourier features method</span>
+    <span class="c1"># from</span>
+    <span class="c1"># to approximate stationary kernels. It has been enhanced from</span>
+    <span class="c1"># the original implementation to support the cosine_only option, which is critical</span>
+    <span class="c1"># for</span>
+    <span class="c1"># the ProductKernel implementation where we need to avoid the tensor product of sine</span>
+    <span class="c1"># and</span>
+    <span class="c1"># cosine features.</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cosine_only</span> <span class="ow">and</span> <span class="n">num_random_features</span> <span class="o">%</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">UnsupportedError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Expected an even number of random features, but </span><span class="si">{</span><span class="n">num_random_features</span><span class="si">=}</span><span class="s2">.&quot;</span>
+        <span class="p">)</span>
+
+    <span class="c1"># Get the appropriate number of inputs based on kernel configuration</span>
+    <span class="n">num_inputs</span> <span class="o">=</span> <span class="n">get_kernel_num_inputs</span><span class="p">(</span><span class="n">kernel</span><span class="p">,</span> <span class="n">num_ambient_inputs</span><span class="o">=</span><span class="n">num_inputs</span><span class="p">)</span>
+    <span class="n">input_transform</span> <span class="o">=</span> <span class="n">transforms</span><span class="o">.</span><span class="n">InverseLengthscaleTransform</span><span class="p">(</span><span class="n">kernel</span><span class="p">)</span>
+
+    <span class="c1"># Handle active dimensions if specified</span>
+    <span class="k">if</span> <span class="n">kernel</span><span class="o">.</span><span class="n">active_dims</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">num_inputs</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">kernel</span><span class="o">.</span><span class="n">active_dims</span><span class="p">)</span>
+        <span class="n">input_transform</span> <span class="o">=</span> <span class="n">transforms</span><span class="o">.</span><span class="n">ChainedTransform</span><span class="p">(</span>
+            <span class="n">input_transform</span><span class="p">,</span> <span class="n">transforms</span><span class="o">.</span><span class="n">FeatureSelector</span><span class="p">(</span><span class="n">indices</span><span class="o">=</span><span class="n">kernel</span><span class="o">.</span><span class="n">active_dims</span><span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="c1"># Calculate the constant scaling factor for the features</span>
+    <span class="n">constant</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span>
+        <span class="mi">2</span><span class="o">**</span><span class="mf">0.5</span> <span class="o">*</span> <span class="p">(</span><span class="n">random_feature_scale</span> <span class="ow">or</span> <span class="n">num_random_features</span><span class="o">**-</span><span class="mf">0.5</span><span class="p">),</span>
+        <span class="n">device</span><span class="o">=</span><span class="n">kernel</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+        <span class="n">dtype</span><span class="o">=</span><span class="n">kernel</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">output_transforms</span> <span class="o">=</span> <span class="p">[</span><span class="n">transforms</span><span class="o">.</span><span class="n">SineCosineTransform</span><span class="p">(</span><span class="n">constant</span><span class="p">)]</span>
+
+    <span class="c1"># Handle the cosine_only case by generating random phase shifts</span>
+    <span class="k">if</span> <span class="n">cosine_only</span><span class="p">:</span>
+        <span class="c1"># IMPLEMENTATION NOTE: When cosine_only is True, we use cosine features with</span>
+        <span class="c1"># random phases instead of paired sine and cosine features. This is important</span>
+        <span class="c1"># for ProductKernel where we need to take element-wise products of features.</span>
+        <span class="n">bias</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="mi">2</span>
+            <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">pi</span>
+            <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="n">num_random_features</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">kernel</span><span class="o">.</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">kernel</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">num_raw_features</span> <span class="o">=</span> <span class="n">num_random_features</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">bias</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">num_raw_features</span> <span class="o">=</span> <span class="n">num_random_features</span> <span class="o">//</span> <span class="mi">2</span>
+
+    <span class="c1"># Generate the weight matrix using the provided weight generator</span>
+    <span class="n">weight</span> <span class="o">=</span> <span class="n">weight_generator</span><span class="p">(</span>
+        <span class="n">Size</span><span class="p">([</span><span class="n">kernel</span><span class="o">.</span><span class="n">batch_shape</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span> <span class="o">*</span> <span class="n">num_raw_features</span><span class="p">,</span> <span class="n">num_inputs</span><span class="p">])</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">*</span><span class="n">kernel</span><span class="o">.</span><span class="n">batch_shape</span><span class="p">,</span> <span class="n">num_raw_features</span><span class="p">,</span> <span class="n">num_inputs</span><span class="p">)</span>
+
+    <span class="c1"># Create and return the FourierFeatureMap with appropriate transforms</span>
+    <span class="k">return</span> <span class="n">FourierFeatureMap</span><span class="p">(</span>
+        <span class="n">kernel</span><span class="o">=</span><span class="n">kernel</span><span class="p">,</span>
+        <span class="n">weight</span><span class="o">=</span><span class="n">weight</span><span class="p">,</span>
+        <span class="n">bias</span><span class="o">=</span><span class="n">bias</span><span class="p">,</span>
+        <span class="n">input_transform</span><span class="o">=</span><span class="n">input_transform</span><span class="p">,</span>
+        <span class="n">output_transform</span><span class="o">=</span><span class="n">transforms</span><span class="o">.</span><span class="n">ChainedTransform</span><span class="p">(</span><span class="o">*</span><span class="n">output_transforms</span><span class="p">),</span>
+    <span class="p">)</span>
+
+
+<span class="nd">@GenKernelFeatureMap</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">kernels</span><span class="o">.</span><span class="n">RBFKernel</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_gen_kernel_feature_map_rbf</span><span class="p">(</span>
+    <span class="n">kernel</span><span class="p">:</span> <span class="n">kernels</span><span class="o">.</span><span class="n">RBFKernel</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KernelFeatureMap</span><span class="p">:</span>
+    <span class="c1"># IMPLEMENTATION NOTE: This handler generates Fourier features for the RBF kernel.</span>
+    <span class="c1"># The RBF (Radial Basis Function) kernel is a stationary kernel, so we can use</span>
+    <span class="c1"># random Fourier features to approximate it. The weight generator uses normal</span>
+    <span class="c1"># distributions as specified in Rahimi &amp; Recht (2007).</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_weight_generator</span><span class="p">(</span><span class="n">shape</span><span class="p">:</span> <span class="n">Size</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">n</span><span class="p">,</span> <span class="n">d</span> <span class="o">=</span> <span class="n">shape</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">UnsupportedError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Expected `shape` to be 2-dimensional, but </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span><span class="si">=}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">draw_sobol_normal_samples</span><span class="p">(</span>
+            <span class="n">n</span><span class="o">=</span><span class="n">n</span><span class="p">,</span>
+            <span class="n">d</span><span class="o">=</span><span class="n">d</span><span class="p">,</span>
+            <span class="n">device</span><span class="o">=</span><span class="n">kernel</span><span class="o">.</span><span class="n">device</span><span class="p">,</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="n">kernel</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">_gen_fourier_features</span><span class="p">(</span>
+        <span class="n">kernel</span><span class="o">=</span><span class="n">kernel</span><span class="p">,</span>
+        <span class="n">weight_generator</span><span class="o">=</span><span class="n">_weight_generator</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">)</span>
+
+
+<span class="nd">@GenKernelFeatureMap</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">kernels</span><span class="o">.</span><span class="n">MaternKernel</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_gen_kernel_feature_map_matern</span><span class="p">(</span>
+    <span class="n">kernel</span><span class="p">:</span> <span class="n">kernels</span><span class="o">.</span><span class="n">MaternKernel</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KernelFeatureMap</span><span class="p">:</span>
+    <span class="c1"># smoothness parameter nu. The spectral density guides weight sampling.</span>
+    <span class="c1"># For Matern kernels, we use a different weight generator that incorporates the</span>
+    <span class="c1"># smoothness parameter nu. Weights follow a distribution based on nu.</span>
+    <span class="c1"># This follows the Matern kernel&#39;s spectral density.</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_weight_generator</span><span class="p">(</span><span class="n">shape</span><span class="p">:</span> <span class="n">Size</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">n</span><span class="p">,</span> <span class="n">d</span> <span class="o">=</span> <span class="n">shape</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">UnsupportedError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Expected `shape` to be 2-dimensional, but </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span><span class="si">=}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="n">dtype</span> <span class="o">=</span> <span class="n">kernel</span><span class="o">.</span><span class="n">dtype</span>
+        <span class="n">device</span> <span class="o">=</span> <span class="n">kernel</span><span class="o">.</span><span class="n">device</span>
+        <span class="n">nu</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">kernel</span><span class="o">.</span><span class="n">nu</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">normals</span> <span class="o">=</span> <span class="n">draw_sobol_normal_samples</span><span class="p">(</span><span class="n">n</span><span class="o">=</span><span class="n">n</span><span class="p">,</span> <span class="n">d</span><span class="o">=</span><span class="n">d</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="c1"># For Matern kernels, we sample from a Gamma distribution based on nu</span>
+        <span class="k">return</span> <span class="n">Gamma</span><span class="p">(</span><span class="n">nu</span><span class="p">,</span> <span class="n">nu</span><span class="p">)</span><span class="o">.</span><span class="n">rsample</span><span class="p">((</span><span class="n">n</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">rsqrt</span><span class="p">()</span> <span class="o">*</span> <span class="n">normals</span>
+
+    <span class="k">return</span> <span class="n">_gen_fourier_features</span><span class="p">(</span>
+        <span class="n">kernel</span><span class="o">=</span><span class="n">kernel</span><span class="p">,</span>
+        <span class="n">weight_generator</span><span class="o">=</span><span class="n">_weight_generator</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">)</span>
+
+
+<span class="nd">@GenKernelFeatureMap</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">kernels</span><span class="o">.</span><span class="n">ScaleKernel</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_gen_kernel_feature_map_scale</span><span class="p">(</span>
+    <span class="n">kernel</span><span class="p">:</span> <span class="n">kernels</span><span class="o">.</span><span class="n">ScaleKernel</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">num_ambient_inputs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KernelFeatureMap</span><span class="p">:</span>
+    <span class="n">active_dims</span> <span class="o">=</span> <span class="n">kernel</span><span class="o">.</span><span class="n">active_dims</span>
+    <span class="n">num_scale_kernel_inputs</span> <span class="o">=</span> <span class="n">get_kernel_num_inputs</span><span class="p">(</span>
+        <span class="n">kernel</span><span class="o">=</span><span class="n">kernel</span><span class="p">,</span>
+        <span class="n">num_ambient_inputs</span><span class="o">=</span><span class="n">num_ambient_inputs</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">kwargs_copy</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">kwargs_copy</span><span class="p">[</span><span class="s2">&quot;num_ambient_inputs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">num_scale_kernel_inputs</span>
+    <span class="n">feature_map</span> <span class="o">=</span> <span class="n">gen_kernel_feature_map</span><span class="p">(</span>
+        <span class="n">kernel</span><span class="o">.</span><span class="n">base_kernel</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs_copy</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">active_dims</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">active_dims</span> <span class="ow">is</span> <span class="ow">not</span> <span class="n">kernel</span><span class="o">.</span><span class="n">base_kernel</span><span class="o">.</span><span class="n">active_dims</span><span class="p">:</span>
+        <span class="n">feature_map</span><span class="o">.</span><span class="n">input_transform</span> <span class="o">=</span> <span class="n">transforms</span><span class="o">.</span><span class="n">ChainedTransform</span><span class="p">(</span>
+            <span class="n">feature_map</span><span class="o">.</span><span class="n">input_transform</span><span class="p">,</span> <span class="n">transforms</span><span class="o">.</span><span class="n">FeatureSelector</span><span class="p">(</span><span class="n">indices</span><span class="o">=</span><span class="n">active_dims</span><span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="n">feature_map</span><span class="o">.</span><span class="n">output_transform</span> <span class="o">=</span> <span class="n">transforms</span><span class="o">.</span><span class="n">ChainedTransform</span><span class="p">(</span>
+        <span class="n">transforms</span><span class="o">.</span><span class="n">OutputscaleTransform</span><span class="p">(</span><span class="n">kernel</span><span class="p">),</span> <span class="n">feature_map</span><span class="o">.</span><span class="n">output_transform</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">feature_map</span>
+
+
+<span class="nd">@GenKernelFeatureMap</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">kernels</span><span class="o">.</span><span class="n">ProductKernel</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_gen_kernel_feature_map_product</span><span class="p">(</span>
+    <span class="n">kernel</span><span class="p">:</span> <span class="n">kernels</span><span class="o">.</span><span class="n">ProductKernel</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KernelFeatureMap</span><span class="p">:</span>
+    <span class="n">feature_maps</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">sub_kernel</span> <span class="ow">in</span> <span class="n">kernel</span><span class="o">.</span><span class="n">kernels</span><span class="p">:</span>
+        <span class="n">feature_map</span> <span class="o">=</span> <span class="n">gen_kernel_feature_map</span><span class="p">(</span><span class="n">sub_kernel</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="n">feature_maps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">feature_map</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">OuterProductFeatureMap</span><span class="p">(</span><span class="n">feature_maps</span><span class="o">=</span><span class="n">feature_maps</span><span class="p">)</span>
+
+
+<span class="nd">@GenKernelFeatureMap</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">kernels</span><span class="o">.</span><span class="n">AdditiveKernel</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_gen_kernel_feature_map_additive</span><span class="p">(</span>
+    <span class="n">kernel</span><span class="p">:</span> <span class="n">kernels</span><span class="o">.</span><span class="n">AdditiveKernel</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KernelFeatureMap</span><span class="p">:</span>
+    <span class="n">feature_maps</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">sub_kernel</span> <span class="ow">in</span> <span class="n">kernel</span><span class="o">.</span><span class="n">kernels</span><span class="p">:</span>
+        <span class="n">feature_map</span> <span class="o">=</span> <span class="n">gen_kernel_feature_map</span><span class="p">(</span><span class="n">sub_kernel</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="n">feature_maps</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">feature_map</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">DirectSumFeatureMap</span><span class="p">(</span><span class="n">feature_maps</span><span class="o">=</span><span class="n">feature_maps</span><span class="p">)</span>
+
+
+<span class="nd">@GenKernelFeatureMap</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">kernels</span><span class="o">.</span><span class="n">IndexKernel</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_gen_kernel_feature_map_index</span><span class="p">(</span>
+    <span class="n">kernel</span><span class="p">:</span> <span class="n">kernels</span><span class="o">.</span><span class="n">IndexKernel</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KernelFeatureMap</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">IndexKernelFeatureMap</span><span class="p">(</span><span class="n">kernel</span><span class="o">=</span><span class="n">kernel</span><span class="p">)</span>
+
+
+<span class="nd">@GenKernelFeatureMap</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">kernels</span><span class="o">.</span><span class="n">LinearKernel</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_gen_kernel_feature_map_linear</span><span class="p">(</span>
+    <span class="n">kernel</span><span class="p">:</span> <span class="n">kernels</span><span class="o">.</span><span class="n">LinearKernel</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">num_inputs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KernelFeatureMap</span><span class="p">:</span>
+    <span class="n">num_features</span> <span class="o">=</span> <span class="n">get_kernel_num_inputs</span><span class="p">(</span><span class="n">kernel</span><span class="o">=</span><span class="n">kernel</span><span class="p">,</span> <span class="n">num_ambient_inputs</span><span class="o">=</span><span class="n">num_inputs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">LinearKernelFeatureMap</span><span class="p">(</span><span class="n">kernel</span><span class="o">=</span><span class="n">kernel</span><span class="p">,</span> <span class="n">raw_output_shape</span><span class="o">=</span><span class="n">Size</span><span class="p">([</span><span class="n">num_features</span><span class="p">]))</span>
+
+
+<span class="nd">@GenKernelFeatureMap</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">kernels</span><span class="o">.</span><span class="n">MultitaskKernel</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_gen_kernel_feature_map_multitask</span><span class="p">(</span>
+    <span class="n">kernel</span><span class="p">:</span> <span class="n">kernels</span><span class="o">.</span><span class="n">MultitaskKernel</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KernelFeatureMap</span><span class="p">:</span>
+    <span class="n">data_feature_map</span> <span class="o">=</span> <span class="n">gen_kernel_feature_map</span><span class="p">(</span><span class="n">kernel</span><span class="o">.</span><span class="n">data_covar_module</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">MultitaskKernelFeatureMap</span><span class="p">(</span><span class="n">kernel</span><span class="o">=</span><span class="n">kernel</span><span class="p">,</span> <span class="n">data_feature_map</span><span class="o">=</span><span class="n">data_feature_map</span><span class="p">)</span>
+
+
+<span class="nd">@GenKernelFeatureMap</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">kernels</span><span class="o">.</span><span class="n">LCMKernel</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_gen_kernel_feature_map_lcm</span><span class="p">(</span>
+    <span class="n">kernel</span><span class="p">:</span> <span class="n">kernels</span><span class="o">.</span><span class="n">LCMKernel</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="n">Any</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">KernelFeatureMap</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">_gen_kernel_feature_map_additive</span><span class="p">(</span>
+        <span class="n">kernel</span><span class="o">=</span><span class="n">kernel</span><span class="p">,</span> <span class="n">sub_kernels</span><span class="o">=</span><span class="n">kernel</span><span class="o">.</span><span class="n">covar_module_list</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+    <span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p></p>
+  </div>
+
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

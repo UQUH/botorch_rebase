@@ -1,0 +1,226 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>botorch.optim.utils.timeout &mdash; BoTorch  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/custom.css?v=ca3e82f4" />
+
+  
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            BoTorch
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../acquisition.html">botorch.acquisition</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../models.html">botorch.models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../generation.html">botorch.generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../posteriors.html">botorch.posteriors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../optim.html">botorch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../fit.html">botorch.fit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../sampling.html">botorch.sampling</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cross_validation.html">botorch.cross_validation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../settings.html">botorch.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../logging.html">botorch.logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../test_functions.html">botorch.test_functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../test_utils.html">botorch.test_utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../exceptions.html">botorch.exceptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../utils.html">botorch.utils</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">BoTorch</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">botorch.optim.utils.timeout</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for botorch.optim.utils.timeout</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Copyright (c) Meta Platforms, Inc. and affiliates.</span>
+<span class="c1">#</span>
+<span class="c1"># This source code is licensed under the MIT license found in the</span>
+<span class="c1"># LICENSE file in the root directory of this source tree.</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Sequence</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy.typing</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">npt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.exceptions.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">OptimizationTimeoutError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy</span><span class="w"> </span><span class="kn">import</span> <span class="n">optimize</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">threadpoolctl</span><span class="w"> </span><span class="kn">import</span> <span class="n">threadpool_limits</span>
+
+
+<div class="viewcode-block" id="minimize_with_timeout">
+<a class="viewcode-back" href="../../../../optim.html#botorch.optim.utils.timeout.minimize_with_timeout">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">minimize_with_timeout</span><span class="p">(</span>
+    <span class="n">fun</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="nb">float</span><span class="p">],</span>
+    <span class="n">x0</span><span class="p">:</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">,</span>
+    <span class="n">args</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Any</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+    <span class="n">method</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">jac</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Callable</span> <span class="o">|</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">hess</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Callable</span> <span class="o">|</span> <span class="n">optimize</span><span class="o">.</span><span class="n">HessianUpdateStrategy</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">hessp</span><span class="p">:</span> <span class="n">Callable</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">bounds</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">|</span> <span class="n">optimize</span><span class="o">.</span><span class="n">Bounds</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">constraints</span><span class="o">=</span><span class="p">(),</span>  <span class="c1"># Typing this properly is a s**t job</span>
+    <span class="n">tol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">callback</span><span class="p">:</span> <span class="n">Callable</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">options</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">timeout_sec</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">optimize</span><span class="o">.</span><span class="n">OptimizeResult</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Wrapper around scipy.optimize.minimize to support timeout.</span>
+
+<span class="sd">    This method calls scipy.optimize.minimize with all arguments forwarded</span>
+<span class="sd">    verbatim. The only difference is that if provided a `timeout_sec` argument,</span>
+<span class="sd">    it will automatically stop the optimziation after the timeout is reached.</span>
+
+<span class="sd">    Internally, this is achieved by automatically constructing a wrapper callback</span>
+<span class="sd">    method that is injected to the scipy.optimize.minimize call and that keeps</span>
+<span class="sd">    track of the runtime and the optimization variables at the current iteration.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">timeout_sec</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span>
+        <span class="n">callback_data</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;num_iterations&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>  <span class="c1"># update from withing callback below</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">timeout_callback</span><span class="p">(</span><span class="n">xk</span><span class="p">:</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+            <span class="n">runtime</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+            <span class="n">callback_data</span><span class="p">[</span><span class="s2">&quot;num_iterations&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">runtime</span> <span class="o">&gt;</span> <span class="n">timeout_sec</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="n">OptimizationTimeoutError</span><span class="p">(</span><span class="n">current_x</span><span class="o">=</span><span class="n">xk</span><span class="p">,</span> <span class="n">runtime</span><span class="o">=</span><span class="n">runtime</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span>
+
+        <span class="k">if</span> <span class="n">callback</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">wrapped_callback</span> <span class="o">=</span> <span class="n">timeout_callback</span>
+
+        <span class="k">elif</span> <span class="nb">callable</span><span class="p">(</span><span class="n">method</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+                <span class="s2">&quot;Custom callable not supported for `method` argument.&quot;</span>
+            <span class="p">)</span>
+
+        <span class="k">elif</span> <span class="n">method</span> <span class="o">==</span> <span class="s2">&quot;trust-constr&quot;</span><span class="p">:</span>  <span class="c1"># special signature</span>
+
+            <span class="k">def</span><span class="w"> </span><span class="nf">wrapped_callback</span><span class="p">(</span>
+                <span class="n">xk</span><span class="p">:</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">optimize</span><span class="o">.</span><span class="n">OptimizeResult</span>
+            <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+                <span class="c1"># order here is important to make sure base callback gets executed</span>
+                <span class="k">return</span> <span class="n">callback</span><span class="p">(</span><span class="n">xk</span><span class="p">,</span> <span class="n">state</span><span class="p">)</span> <span class="ow">or</span> <span class="n">timeout_callback</span><span class="p">(</span><span class="n">xk</span><span class="o">=</span><span class="n">xk</span><span class="p">)</span>
+
+        <span class="k">else</span><span class="p">:</span>
+
+            <span class="k">def</span><span class="w"> </span><span class="nf">wrapped_callback</span><span class="p">(</span><span class="n">xk</span><span class="p">:</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">timeout_callback</span><span class="p">(</span><span class="n">xk</span><span class="o">=</span><span class="n">xk</span><span class="p">)</span>
+                <span class="n">callback</span><span class="p">(</span><span class="n">xk</span><span class="p">)</span>
+
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">wrapped_callback</span> <span class="o">=</span> <span class="n">callback</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span><span class="s2">&quot;error&quot;</span><span class="p">,</span> <span class="n">message</span><span class="o">=</span><span class="s2">&quot;Method .* cannot handle&quot;</span><span class="p">)</span>
+        <span class="c1"># To prevent slowdowns after scipy 1.15.</span>
+        <span class="c1"># See https://github.com/scipy/scipy/issues/22438.</span>
+        <span class="k">with</span> <span class="n">threadpool_limits</span><span class="p">(</span><span class="n">limits</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">user_api</span><span class="o">=</span><span class="s2">&quot;blas&quot;</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">optimize</span><span class="o">.</span><span class="n">minimize</span><span class="p">(</span>
+                <span class="n">fun</span><span class="o">=</span><span class="n">fun</span><span class="p">,</span>
+                <span class="n">x0</span><span class="o">=</span><span class="n">x0</span><span class="p">,</span>
+                <span class="n">args</span><span class="o">=</span><span class="n">args</span><span class="p">,</span>
+                <span class="n">method</span><span class="o">=</span><span class="n">method</span><span class="p">,</span>
+                <span class="n">jac</span><span class="o">=</span><span class="n">jac</span><span class="p">,</span>
+                <span class="n">hess</span><span class="o">=</span><span class="n">hess</span><span class="p">,</span>
+                <span class="n">hessp</span><span class="o">=</span><span class="n">hessp</span><span class="p">,</span>
+                <span class="n">bounds</span><span class="o">=</span><span class="n">bounds</span><span class="p">,</span>
+                <span class="n">constraints</span><span class="o">=</span><span class="n">constraints</span><span class="p">,</span>
+                <span class="n">tol</span><span class="o">=</span><span class="n">tol</span><span class="p">,</span>
+                <span class="n">callback</span><span class="o">=</span><span class="n">wrapped_callback</span><span class="p">,</span>
+                <span class="n">options</span><span class="o">=</span><span class="n">options</span><span class="p">,</span>
+            <span class="p">)</span>
+    <span class="k">except</span> <span class="n">OptimizationTimeoutError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">msg</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Optimization timed out after </span><span class="si">{</span><span class="n">e</span><span class="o">.</span><span class="n">runtime</span><span class="si">}</span><span class="s2"> seconds.&quot;</span>
+        <span class="n">current_fun</span><span class="p">,</span> <span class="o">*</span><span class="n">_</span> <span class="o">=</span> <span class="n">fun</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">current_x</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">optimize</span><span class="o">.</span><span class="n">OptimizeResult</span><span class="p">(</span>
+            <span class="n">fun</span><span class="o">=</span><span class="n">current_fun</span><span class="p">,</span>
+            <span class="n">x</span><span class="o">=</span><span class="n">e</span><span class="o">.</span><span class="n">current_x</span><span class="p">,</span>
+            <span class="n">nit</span><span class="o">=</span><span class="n">callback_data</span><span class="p">[</span><span class="s2">&quot;num_iterations&quot;</span><span class="p">],</span>
+            <span class="n">success</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>  <span class="c1"># same as when maxiter is reached</span>
+            <span class="n">status</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>  <span class="c1"># same as when L-BFGS-B reaches maxiter</span>
+            <span class="n">message</span><span class="o">=</span><span class="n">msg</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p></p>
+  </div>
+
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

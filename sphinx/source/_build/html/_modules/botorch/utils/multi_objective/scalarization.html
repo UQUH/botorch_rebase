@@ -1,0 +1,227 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>botorch.utils.multi_objective.scalarization &mdash; BoTorch  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/custom.css?v=ca3e82f4" />
+
+  
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            BoTorch
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../acquisition.html">botorch.acquisition</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../models.html">botorch.models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../generation.html">botorch.generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../posteriors.html">botorch.posteriors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../optim.html">botorch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../fit.html">botorch.fit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../sampling.html">botorch.sampling</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cross_validation.html">botorch.cross_validation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../settings.html">botorch.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../logging.html">botorch.logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../test_functions.html">botorch.test_functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../test_utils.html">botorch.test_utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../exceptions.html">botorch.exceptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../utils.html">botorch.utils</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">BoTorch</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">botorch.utils.multi_objective.scalarization</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for botorch.utils.multi_objective.scalarization</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Copyright (c) Meta Platforms, Inc. and affiliates.</span>
+<span class="c1">#</span>
+<span class="c1"># This source code is licensed under the MIT license found in the</span>
+<span class="c1"># LICENSE file in the root directory of this source tree.</span>
+
+<span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Helper utilities for constructing scalarizations.</span>
+
+<span class="sd">References</span>
+
+<span class="sd">.. [Knowles2005]</span>
+<span class="sd">    J. Knowles, &quot;ParEGO: a hybrid algorithm with on-line landscape approximation</span>
+<span class="sd">    for expensive multiobjective optimization problems,&quot; in IEEE Transactions</span>
+<span class="sd">    on Evolutionary Computation, vol. 10, no. 1, pp. 50-66, Feb. 2006.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.exceptions.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">BotorchTensorDimensionError</span><span class="p">,</span> <span class="n">UnsupportedError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.utils.transforms</span><span class="w"> </span><span class="kn">import</span> <span class="n">normalize</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tensor</span>
+
+
+<div class="viewcode-block" id="get_chebyshev_scalarization">
+<a class="viewcode-back" href="../../../../utils.html#botorch.utils.multi_objective.scalarization.get_chebyshev_scalarization">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_chebyshev_scalarization</span><span class="p">(</span>
+    <span class="n">weights</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">Y</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">alpha</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.05</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">[[</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">],</span> <span class="n">Tensor</span><span class="p">]:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Construct an augmented Chebyshev scalarization.</span>
+
+<span class="sd">    The augmented Chebyshev scalarization is given by</span>
+<span class="sd">        g(y) = max_i(w_i * y_i) + alpha * sum_i(w_i * y_i)</span>
+
+<span class="sd">    where the goal is to minimize g(y) in the setting where all objectives y_i are</span>
+<span class="sd">    to be minimized. Since the default in BoTorch is to maximize all objectives,</span>
+<span class="sd">    this method constructs a Chebyshev scalarization where the inputs are first</span>
+<span class="sd">    multiplied by -1, so that all objectives are to be minimized. Then, it computes</span>
+<span class="sd">    g(y) (which should be minimized), and returns -g(y), which should be maximized.</span>
+
+<span class="sd">    Minimizing an objective is supported by passing a negative</span>
+<span class="sd">    weight for that objective. To make all w * y&#39;s have the same sign</span>
+<span class="sd">    such that they are comparable when computing max(w * y), outcomes of minimization</span>
+<span class="sd">    objectives are shifted from [0,1] to [-1,0].</span>
+
+<span class="sd">    See [Knowles2005]_ for details.</span>
+
+<span class="sd">    This scalarization can be used with qExpectedImprovement to implement q-ParEGO</span>
+<span class="sd">    as proposed in [Daulton2020qehvi]_.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        weights: A `m`-dim tensor of weights.</span>
+<span class="sd">            Positive for maximization and negative for minimization.</span>
+<span class="sd">        Y: A `n x m`-dim tensor of observed outcomes, which are used for</span>
+<span class="sd">            scaling the outcomes to [0,1] or [-1,0]. If `n=0`, then outcomes</span>
+<span class="sd">            are left unnormalized.</span>
+<span class="sd">        alpha: Parameter governing the influence of the weighted sum term. The</span>
+<span class="sd">            default value comes from [Knowles2005]_.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Transform function using the objective weights.</span>
+
+<span class="sd">    Example:</span>
+<span class="sd">        &gt;&gt;&gt; weights = torch.tensor([0.75, -0.25])</span>
+<span class="sd">        &gt;&gt;&gt; transform = get_aug_chebyshev_scalarization(weights, Y)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># the chebyshev_obj assumes all objectives should be minimized, so</span>
+    <span class="c1"># multiply Y by -1</span>
+    <span class="n">Y</span> <span class="o">=</span> <span class="o">-</span><span class="n">Y</span>
+    <span class="k">if</span> <span class="n">weights</span><span class="o">.</span><span class="n">shape</span> <span class="o">!=</span> <span class="n">Y</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">:]:</span>
+        <span class="k">raise</span> <span class="n">BotorchTensorDimensionError</span><span class="p">(</span>
+            <span class="s2">&quot;weights must be an `m`-dim tensor where Y is `... x m`.&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;Got shapes </span><span class="si">{</span><span class="n">weights</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2"> and </span><span class="si">{</span><span class="n">Y</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">.&quot;</span>
+        <span class="p">)</span>
+    <span class="k">elif</span> <span class="n">Y</span><span class="o">.</span><span class="n">ndim</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;Batched Y is not currently supported.&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">chebyshev_obj</span><span class="p">(</span><span class="n">Y</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">X</span><span class="p">:</span> <span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+        <span class="n">product</span> <span class="o">=</span> <span class="n">weights</span> <span class="o">*</span> <span class="n">Y</span>
+        <span class="k">return</span> <span class="n">product</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">values</span> <span class="o">+</span> <span class="n">alpha</span> <span class="o">*</span> <span class="n">product</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="c1"># A boolean mask indicating if minimizing an objective</span>
+    <span class="n">minimize</span> <span class="o">=</span> <span class="n">weights</span> <span class="o">&lt;</span> <span class="mi">0</span>
+    <span class="k">if</span> <span class="n">Y</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">minimize</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="k">raise</span> <span class="n">UnsupportedError</span><span class="p">(</span>
+                <span class="s2">&quot;negative weights (for minimization) are only supported if &quot;</span>
+                <span class="s2">&quot;Y is provided.&quot;</span>
+            <span class="p">)</span>
+        <span class="c1"># If there are no observations, we do not need to normalize the objectives</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">obj</span><span class="p">(</span><span class="n">Y</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">X</span><span class="p">:</span> <span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+            <span class="c1"># multiply the scalarization by -1, so that the scalarization should</span>
+            <span class="c1"># be maximized</span>
+            <span class="k">return</span> <span class="o">-</span><span class="n">chebyshev_obj</span><span class="p">(</span><span class="n">Y</span><span class="o">=-</span><span class="n">Y</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">obj</span>
+    <span class="c1"># Set the bounds to be [min(Y_m), max(Y_m)], for each objective m.</span>
+    <span class="n">Y_bounds</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">Y</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">,</span> <span class="n">Y</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">values</span><span class="p">])</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">obj</span><span class="p">(</span><span class="n">Y</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span> <span class="n">X</span><span class="p">:</span> <span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+        <span class="c1"># scale to [0,1]</span>
+        <span class="n">Y_normalized</span> <span class="o">=</span> <span class="n">normalize</span><span class="p">(</span><span class="o">-</span><span class="n">Y</span><span class="p">,</span> <span class="n">bounds</span><span class="o">=</span><span class="n">Y_bounds</span><span class="p">)</span>
+        <span class="c1"># If minimizing an objective, convert Y_normalized values to [-1,0],</span>
+        <span class="c1"># such that min(w*y) makes sense, we want all w*y&#39;s to be positive</span>
+        <span class="n">Y_normalized</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">minimize</span><span class="p">]</span> <span class="o">=</span> <span class="n">Y_normalized</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">minimize</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="c1"># multiply the scalarization by -1, so that the scalarization should</span>
+        <span class="c1"># be maximized</span>
+        <span class="k">return</span> <span class="o">-</span><span class="n">chebyshev_obj</span><span class="p">(</span><span class="n">Y</span><span class="o">=</span><span class="n">Y_normalized</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">obj</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p></p>
+  </div>
+
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

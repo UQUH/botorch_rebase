@@ -1,0 +1,239 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>botorch.models.transforms.factory &mdash; BoTorch  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/custom.css?v=ca3e82f4" />
+
+  
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            BoTorch
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../acquisition.html">botorch.acquisition</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../models.html">botorch.models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../generation.html">botorch.generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../posteriors.html">botorch.posteriors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../optim.html">botorch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../fit.html">botorch.fit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../sampling.html">botorch.sampling</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cross_validation.html">botorch.cross_validation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../settings.html">botorch.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../logging.html">botorch.logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../test_functions.html">botorch.test_functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../test_utils.html">botorch.test_utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../exceptions.html">botorch.exceptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../utils.html">botorch.utils</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">BoTorch</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">botorch.models.transforms.factory</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for botorch.models.transforms.factory</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Copyright (c) Meta Platforms, Inc. and affiliates.</span>
+<span class="c1">#</span>
+<span class="c1"># This source code is licensed under the MIT license found in the</span>
+<span class="c1"># LICENSE file in the root directory of this source tree.</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">OrderedDict</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.models.transforms.input</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">ChainedInputTransform</span><span class="p">,</span>
+    <span class="n">Normalize</span><span class="p">,</span>
+    <span class="n">OneHotToNumeric</span><span class="p">,</span>
+    <span class="n">Round</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tensor</span>
+
+
+<div class="viewcode-block" id="get_rounding_input_transform">
+<a class="viewcode-back" href="../../../../models.html#botorch.models.transforms.factory.get_rounding_input_transform">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_rounding_input_transform</span><span class="p">(</span>
+    <span class="n">one_hot_bounds</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">,</span>
+    <span class="n">integer_indices</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">categorical_features</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">initialization</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">return_numeric</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">approximate</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ChainedInputTransform</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get a rounding input transform.</span>
+
+<span class="sd">    The rounding function will take inputs from the unit cube,</span>
+<span class="sd">    unnormalize the integers raw search space, round the inputs,</span>
+<span class="sd">    and normalize them back to the unit cube.</span>
+
+<span class="sd">    Categoricals are assumed to be one-hot encoded. Integers are</span>
+<span class="sd">    currently assumed to be contiguous ranges (e.g. [1,2,3] and not</span>
+<span class="sd">    [1,5,7]).</span>
+
+<span class="sd">    TODO: support non-contiguous sets of integers by modifying</span>
+<span class="sd">    the rounding function.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        one_hot_bounds: The raw search space bounds where categoricals are</span>
+<span class="sd">            encoded in one-hot representation and the integer parameters</span>
+<span class="sd">            are not normalized.</span>
+<span class="sd">        integer_indices: The indices of the integer parameters.</span>
+<span class="sd">        categorical_features: A dictionary mapping indices to cardinalities</span>
+<span class="sd">            for the categorical features.</span>
+<span class="sd">        initialization: A boolean indicating whether this exact rounding</span>
+<span class="sd">            function is for initialization. For initialization, the bounds</span>
+<span class="sd">            for are expanded such that the end point of a range is selected</span>
+<span class="sd">            with same probability that an interior point is selected, after</span>
+<span class="sd">            rounding.</span>
+<span class="sd">        return_numeric: A boolean indicating whether to return numeric or</span>
+<span class="sd">            one-hot encoded categoricals. Returning a nummeric</span>
+<span class="sd">            representation is helpful if the downstream code (e.g. kernel)</span>
+<span class="sd">            expects a numeric representation of the categoricals.</span>
+<span class="sd">        approximate: A boolean indicating whether to use an approximate</span>
+<span class="sd">            rounding function.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        The rounding function ChainedInputTransform.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">has_integers</span> <span class="o">=</span> <span class="n">integer_indices</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">integer_indices</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span>
+    <span class="n">has_categoricals</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">categorical_features</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">categorical_features</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">has_integers</span> <span class="ow">or</span> <span class="n">has_categoricals</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s2">&quot;A rounding function is a no-op &quot;</span>
+            <span class="s2">&quot;if there are no integer or categorical parammeters.&quot;</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="n">initialization</span> <span class="ow">and</span> <span class="n">has_integers</span><span class="p">:</span>
+        <span class="c1"># this gives the extreme integer values (end points)</span>
+        <span class="c1"># the same probability as the interior values of the range</span>
+        <span class="n">init_one_hot_bounds</span> <span class="o">=</span> <span class="n">one_hot_bounds</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+        <span class="n">init_one_hot_bounds</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">integer_indices</span><span class="p">]</span> <span class="o">-=</span> <span class="mf">0.4999</span>
+        <span class="n">init_one_hot_bounds</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="n">integer_indices</span><span class="p">]</span> <span class="o">+=</span> <span class="mf">0.4999</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">init_one_hot_bounds</span> <span class="o">=</span> <span class="n">one_hot_bounds</span>
+
+    <span class="n">tfs</span> <span class="o">=</span> <span class="n">OrderedDict</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">has_integers</span><span class="p">:</span>
+        <span class="c1"># unnormalize to integer space</span>
+        <span class="n">tfs</span><span class="p">[</span><span class="s2">&quot;unnormalize_tf&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">Normalize</span><span class="p">(</span>
+            <span class="n">d</span><span class="o">=</span><span class="n">init_one_hot_bounds</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+            <span class="n">bounds</span><span class="o">=</span><span class="n">init_one_hot_bounds</span><span class="p">,</span>
+            <span class="n">indices</span><span class="o">=</span><span class="n">integer_indices</span><span class="p">,</span>
+            <span class="n">transform_on_train</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">transform_on_eval</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">transform_on_fantasize</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="c1"># round</span>
+    <span class="n">tfs</span><span class="p">[</span><span class="s2">&quot;round&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">Round</span><span class="p">(</span>
+        <span class="n">approximate</span><span class="o">=</span><span class="n">approximate</span><span class="p">,</span>
+        <span class="n">transform_on_train</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="n">transform_on_fantasize</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">integer_indices</span><span class="o">=</span><span class="n">integer_indices</span><span class="p">,</span>
+        <span class="n">categorical_features</span><span class="o">=</span><span class="n">categorical_features</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">has_integers</span><span class="p">:</span>
+        <span class="c1"># renormalize to unit cube</span>
+        <span class="n">tfs</span><span class="p">[</span><span class="s2">&quot;normalize_tf&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">Normalize</span><span class="p">(</span>
+            <span class="n">d</span><span class="o">=</span><span class="n">one_hot_bounds</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+            <span class="n">bounds</span><span class="o">=</span><span class="n">one_hot_bounds</span><span class="p">,</span>
+            <span class="n">indices</span><span class="o">=</span><span class="n">integer_indices</span><span class="p">,</span>
+            <span class="n">transform_on_train</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">transform_on_eval</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">transform_on_fantasize</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">reverse</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="n">return_numeric</span> <span class="ow">and</span> <span class="n">has_categoricals</span><span class="p">:</span>
+        <span class="n">tfs</span><span class="p">[</span><span class="s2">&quot;one_hot_to_numeric&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">OneHotToNumeric</span><span class="p">(</span>
+            <span class="c1"># this is the dimension using one-hot encoded representation</span>
+            <span class="n">dim</span><span class="o">=</span><span class="n">one_hot_bounds</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span>
+            <span class="n">categorical_features</span><span class="o">=</span><span class="n">categorical_features</span><span class="p">,</span>
+            <span class="n">transform_on_train</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">transform_on_eval</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">transform_on_fantasize</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="n">tf</span> <span class="o">=</span> <span class="n">ChainedInputTransform</span><span class="p">(</span><span class="o">**</span><span class="n">tfs</span><span class="p">)</span>
+    <span class="n">tf</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="n">one_hot_bounds</span><span class="o">.</span><span class="n">dtype</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">one_hot_bounds</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+    <span class="n">tf</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">tf</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p></p>
+  </div>
+
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

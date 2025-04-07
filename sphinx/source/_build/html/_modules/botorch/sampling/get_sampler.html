@@ -1,0 +1,252 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>botorch.sampling.get_sampler &mdash; BoTorch  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=ca3e82f4" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            BoTorch
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../acquisition.html">botorch.acquisition</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../models.html">botorch.models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../generation.html">botorch.generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../posteriors.html">botorch.posteriors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../optim.html">botorch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../fit.html">botorch.fit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../sampling.html">botorch.sampling</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cross_validation.html">botorch.cross_validation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../settings.html">botorch.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../logging.html">botorch.logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../test_functions.html">botorch.test_functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../test_utils.html">botorch.test_utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../exceptions.html">botorch.exceptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../utils.html">botorch.utils</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">BoTorch</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">botorch.sampling.get_sampler</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for botorch.sampling.get_sampler</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Copyright (c) Meta Platforms, Inc. and affiliates.</span>
+<span class="c1">#</span>
+<span class="c1"># This source code is licensed under the MIT license found in the</span>
+<span class="c1"># LICENSE file in the root directory of this source tree.</span>
+
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.logging</span><span class="w"> </span><span class="kn">import</span> <span class="n">logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.posteriors.ensemble</span><span class="w"> </span><span class="kn">import</span> <span class="n">EnsemblePosterior</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.posteriors.gpytorch</span><span class="w"> </span><span class="kn">import</span> <span class="n">GPyTorchPosterior</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.posteriors.posterior</span><span class="w"> </span><span class="kn">import</span> <span class="n">Posterior</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.posteriors.posterior_list</span><span class="w"> </span><span class="kn">import</span> <span class="n">PosteriorList</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.posteriors.torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">TorchPosterior</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.posteriors.transformed</span><span class="w"> </span><span class="kn">import</span> <span class="n">TransformedPosterior</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">MCSampler</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.index_sampler</span><span class="w"> </span><span class="kn">import</span> <span class="n">IndexSampler</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.list_sampler</span><span class="w"> </span><span class="kn">import</span> <span class="n">ListSampler</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.normal</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">IIDNormalSampler</span><span class="p">,</span>
+    <span class="n">NormalMCSampler</span><span class="p">,</span>
+    <span class="n">SobolQMCNormalSampler</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.utils.dispatcher</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dispatcher</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">gpytorch.distributions</span><span class="w"> </span><span class="kn">import</span> <span class="n">MultivariateNormal</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch.distributions</span><span class="w"> </span><span class="kn">import</span> <span class="n">Distribution</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch.quasirandom</span><span class="w"> </span><span class="kn">import</span> <span class="n">SobolEngine</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_posterior_to_distribution_encoder</span><span class="p">(</span>
+    <span class="n">posterior</span><span class="p">:</span> <span class="n">Posterior</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">type</span><span class="p">[</span><span class="n">Distribution</span><span class="p">]</span> <span class="o">|</span> <span class="nb">type</span><span class="p">[</span><span class="n">Posterior</span><span class="p">]:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;An encoder returning the type of the distribution for `TorchPosterior`</span>
+<span class="sd">    and the type of the posterior for the rest.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">posterior</span><span class="p">,</span> <span class="n">TorchPosterior</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">type</span><span class="p">(</span><span class="n">posterior</span><span class="o">.</span><span class="n">distribution</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">type</span><span class="p">(</span><span class="n">posterior</span><span class="p">)</span>
+
+
+<span class="n">GetSampler</span> <span class="o">=</span> <span class="n">Dispatcher</span><span class="p">(</span><span class="s2">&quot;get_sampler&quot;</span><span class="p">,</span> <span class="n">encoder</span><span class="o">=</span><span class="n">_posterior_to_distribution_encoder</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="get_sampler">
+<a class="viewcode-back" href="../../../sampling.html#botorch.sampling.get_sampler.get_sampler">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_sampler</span><span class="p">(</span>
+    <span class="n">posterior</span><span class="p">:</span> <span class="n">TorchPosterior</span><span class="p">,</span>
+    <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MCSampler</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Get the sampler for the given posterior.</span>
+
+<span class="sd">    The sampler can be used as `sampler(posterior)` to produce samples</span>
+<span class="sd">    suitable for use in acquisition function optimization via SAA.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        posterior: A `Posterior` to get the sampler for.</span>
+<span class="sd">        sample_shape: The sample shape of the samples produced by the</span>
+<span class="sd">            given sampler. The full shape of the resulting samples is</span>
+<span class="sd">            given by `posterior._extended_shape(sample_shape)`.</span>
+<span class="sd">        seed: Seed used to initialize sampler.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        The `MCSampler` object for the given posterior.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">GetSampler</span><span class="p">(</span><span class="n">posterior</span><span class="p">,</span> <span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">)</span></div>
+
+
+
+<span class="nd">@GetSampler</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">MultivariateNormal</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_sampler_mvn</span><span class="p">(</span>
+    <span class="n">posterior</span><span class="p">:</span> <span class="n">GPyTorchPosterior</span><span class="p">,</span>
+    <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">NormalMCSampler</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;The Sobol normal sampler for the `MultivariateNormal` posterior.</span>
+
+<span class="sd">    If the output dim is too large, falls back to `IIDNormalSampler`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">sampler</span> <span class="o">=</span> <span class="n">SobolQMCNormalSampler</span><span class="p">(</span><span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">)</span>
+    <span class="n">collapsed_shape</span> <span class="o">=</span> <span class="n">sampler</span><span class="o">.</span><span class="n">_get_collapsed_shape</span><span class="p">(</span><span class="n">posterior</span><span class="o">=</span><span class="n">posterior</span><span class="p">)</span>
+    <span class="n">base_collapsed_shape</span> <span class="o">=</span> <span class="n">collapsed_shape</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">sample_shape</span><span class="p">)</span> <span class="p">:]</span>
+    <span class="k">if</span> <span class="n">base_collapsed_shape</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span> <span class="o">&gt;</span> <span class="n">SobolEngine</span><span class="o">.</span><span class="n">MAXDIM</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Output dim </span><span class="si">{</span><span class="n">base_collapsed_shape</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span><span class="si">}</span><span class="s2"> is too large for the &quot;</span>
+            <span class="s2">&quot;Sobol engine. Using IIDNormalSampler instead.&quot;</span>
+        <span class="p">)</span>
+        <span class="n">sampler</span> <span class="o">=</span> <span class="n">IIDNormalSampler</span><span class="p">(</span><span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sampler</span>
+
+
+<span class="nd">@GetSampler</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">TransformedPosterior</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_sampler_derived</span><span class="p">(</span>
+    <span class="n">posterior</span><span class="p">:</span> <span class="n">TransformedPosterior</span><span class="p">,</span>
+    <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MCSampler</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Get the sampler for the underlying posterior.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">get_sampler</span><span class="p">(</span>
+        <span class="n">posterior</span><span class="o">=</span><span class="n">posterior</span><span class="o">.</span><span class="n">_posterior</span><span class="p">,</span>
+        <span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">,</span>
+        <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">,</span>
+    <span class="p">)</span>
+
+
+<span class="nd">@GetSampler</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">PosteriorList</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_sampler_list</span><span class="p">(</span>
+    <span class="n">posterior</span><span class="p">:</span> <span class="n">PosteriorList</span><span class="p">,</span> <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MCSampler</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Get the `ListSampler` with the appropriate list of samplers.&quot;&quot;&quot;</span>
+    <span class="n">samplers</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">get_sampler</span><span class="p">(</span><span class="n">posterior</span><span class="o">=</span><span class="n">p</span><span class="p">,</span> <span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">posterior</span><span class="o">.</span><span class="n">posteriors</span>
+    <span class="p">]</span>
+    <span class="k">return</span> <span class="n">ListSampler</span><span class="p">(</span><span class="o">*</span><span class="n">samplers</span><span class="p">)</span>
+
+
+<span class="nd">@GetSampler</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="n">EnsemblePosterior</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_sampler_ensemble</span><span class="p">(</span>
+    <span class="n">posterior</span><span class="p">:</span> <span class="n">EnsemblePosterior</span><span class="p">,</span>
+    <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span>
+    <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MCSampler</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Get the `IndexSampler` for the `EnsemblePosterior`.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">IndexSampler</span><span class="p">(</span><span class="n">sample_shape</span><span class="o">=</span><span class="n">sample_shape</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="n">seed</span><span class="p">)</span>
+
+
+<span class="nd">@GetSampler</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="nb">object</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_not_found_error</span><span class="p">(</span>
+    <span class="n">posterior</span><span class="p">:</span> <span class="n">Posterior</span><span class="p">,</span>
+    <span class="n">sample_shape</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">,</span>
+    <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">&quot;A registered `MCSampler` for posterior </span><span class="si">{</span><span class="n">posterior</span><span class="si">}</span><span class="s2"> is not found. You can &quot;</span>
+        <span class="s2">&quot;implement and register one using `@GetSampler.register`.&quot;</span>
+    <span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p></p>
+  </div>
+
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

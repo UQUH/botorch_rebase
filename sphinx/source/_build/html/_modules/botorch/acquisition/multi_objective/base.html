@@ -1,0 +1,279 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>botorch.acquisition.multi_objective.base &mdash; BoTorch  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/custom.css?v=ca3e82f4" />
+
+  
+      <script src="../../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            BoTorch
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../acquisition.html">botorch.acquisition</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../models.html">botorch.models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../generation.html">botorch.generation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../posteriors.html">botorch.posteriors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../optim.html">botorch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../fit.html">botorch.fit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../sampling.html">botorch.sampling</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../cross_validation.html">botorch.cross_validation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../settings.html">botorch.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../logging.html">botorch.logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../test_functions.html">botorch.test_functions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../test_utils.html">botorch.test_utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../exceptions.html">botorch.exceptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../utils.html">botorch.utils</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">BoTorch</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">botorch.acquisition.multi_objective.base</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for botorch.acquisition.multi_objective.base</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Copyright (c) Meta Platforms, Inc. and affiliates.</span>
+<span class="c1">#</span>
+<span class="c1"># This source code is licensed under the MIT license found in the</span>
+<span class="c1"># LICENSE file in the root directory of this source tree.</span>
+
+<span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Base classes for multi-objective acquisition functions.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">ABC</span><span class="p">,</span> <span class="n">abstractmethod</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Callable</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.acquisition.acquisition</span><span class="w"> </span><span class="kn">import</span> <span class="n">AcquisitionFunction</span><span class="p">,</span> <span class="n">MCSamplerMixin</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.acquisition.multi_objective.objective</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">IdentityMCMultiOutputObjective</span><span class="p">,</span>
+    <span class="n">MCMultiOutputObjective</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.acquisition.objective</span><span class="w"> </span><span class="kn">import</span> <span class="n">PosteriorTransform</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.exceptions.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">UnsupportedError</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.models.model</span><span class="w"> </span><span class="kn">import</span> <span class="n">Model</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.models.transforms.input</span><span class="w"> </span><span class="kn">import</span> <span class="n">InputPerturbation</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">botorch.sampling.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">MCSampler</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tensor</span>
+
+
+<div class="viewcode-block" id="MultiObjectiveAnalyticAcquisitionFunction">
+<a class="viewcode-back" href="../../../../acquisition.html#botorch.acquisition.multi_objective.base.MultiObjectiveAnalyticAcquisitionFunction">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MultiObjectiveAnalyticAcquisitionFunction</span><span class="p">(</span><span class="n">AcquisitionFunction</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Abstract base class for Multi-Objective batch acquisition functions.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">model</span><span class="p">:</span> <span class="n">Model</span><span class="p">,</span>
+        <span class="n">posterior_transform</span><span class="p">:</span> <span class="n">PosteriorTransform</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Constructor for the MultiObjectiveAnalyticAcquisitionFunction base class.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            model: A fitted model.</span>
+<span class="sd">            posterior_transform: A PosteriorTransform (optional).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">posterior_transform</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span>
+            <span class="n">posterior_transform</span><span class="p">,</span> <span class="n">PosteriorTransform</span>
+        <span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">posterior_transform</span> <span class="o">=</span> <span class="n">posterior_transform</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">UnsupportedError</span><span class="p">(</span>
+                <span class="s2">&quot;Only a posterior_transform of type PosteriorTransform is &quot;</span>
+                <span class="s2">&quot;supported for Multi-Objective analytic acquisition functions.&quot;</span>
+            <span class="p">)</span>
+
+<div class="viewcode-block" id="MultiObjectiveAnalyticAcquisitionFunction.forward">
+<a class="viewcode-back" href="../../../../acquisition.html#botorch.acquisition.multi_objective.base.MultiObjectiveAnalyticAcquisitionFunction.forward">[docs]</a>
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Takes in a `batch_shape x 1 x d` X Tensor of t-batches with `1` `d`-dim</span>
+<span class="sd">        design point each, and returns a Tensor with shape `batch_shape&#39;`, where</span>
+<span class="sd">        `batch_shape&#39;` is the broadcasted batch shape of model and input `X`.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span>  <span class="c1"># pragma: no cover</span></div>
+
+
+<div class="viewcode-block" id="MultiObjectiveAnalyticAcquisitionFunction.set_X_pending">
+<a class="viewcode-back" href="../../../../acquisition.html#botorch.acquisition.multi_objective.base.MultiObjectiveAnalyticAcquisitionFunction.set_X_pending">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_X_pending</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X_pending</span><span class="p">:</span> <span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">UnsupportedError</span><span class="p">(</span>
+            <span class="s2">&quot;Analytic acquisition functions do not account for X_pending yet.&quot;</span>
+        <span class="p">)</span></div>
+</div>
+
+
+
+<div class="viewcode-block" id="MultiObjectiveMCAcquisitionFunction">
+<a class="viewcode-back" href="../../../../acquisition.html#botorch.acquisition.multi_objective.base.MultiObjectiveMCAcquisitionFunction">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MultiObjectiveMCAcquisitionFunction</span><span class="p">(</span><span class="n">AcquisitionFunction</span><span class="p">,</span> <span class="n">MCSamplerMixin</span><span class="p">,</span> <span class="n">ABC</span><span class="p">):</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Abstract base class for Multi-Objective batch acquisition functions.</span>
+
+<span class="sd">    NOTE: This does not inherit from `MCAcquisitionFunction` to avoid circular imports.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        _default_sample_shape: The `sample_shape` for the default sampler.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">_default_sample_shape</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Size</span><span class="p">([</span><span class="mi">128</span><span class="p">])</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">model</span><span class="p">:</span> <span class="n">Model</span><span class="p">,</span>
+        <span class="n">sampler</span><span class="p">:</span> <span class="n">MCSampler</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">objective</span><span class="p">:</span> <span class="n">MCMultiOutputObjective</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">constraints</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Callable</span><span class="p">[[</span><span class="n">Tensor</span><span class="p">],</span> <span class="n">Tensor</span><span class="p">]]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">eta</span><span class="p">:</span> <span class="n">Tensor</span> <span class="o">|</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-3</span><span class="p">,</span>
+        <span class="n">X_pending</span><span class="p">:</span> <span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Constructor for the `MultiObjectiveMCAcquisitionFunction` base class.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            model: A fitted model.</span>
+<span class="sd">            sampler: The sampler used to draw base samples. If not given,</span>
+<span class="sd">                a sampler is generated using `get_sampler`.</span>
+<span class="sd">                NOTE: For posteriors that do not support base samples,</span>
+<span class="sd">                a sampler compatible with intended use case must be provided.</span>
+<span class="sd">                See `ForkedRNGSampler` and `StochasticSampler` as examples.</span>
+<span class="sd">            objective: The MCMultiOutputObjective under which the samples are</span>
+<span class="sd">                evaluated. Defaults to `IdentityMCMultiOutputObjective()`.</span>
+<span class="sd">            constraints: A list of callables, each mapping a Tensor of dimension</span>
+<span class="sd">                `sample_shape x batch-shape x q x m` to a Tensor of dimension</span>
+<span class="sd">                `sample_shape x batch-shape x q`, where negative values imply</span>
+<span class="sd">                feasibility.</span>
+<span class="sd">            eta: The temperature parameter for the sigmoid function used for the</span>
+<span class="sd">                differentiable approximation of the constraints. In case of a float the</span>
+<span class="sd">                same eta is used for every constraint in constraints. In case of a</span>
+<span class="sd">                tensor the length of the tensor must match the number of provided</span>
+<span class="sd">                constraints. The i-th constraint is then estimated with the i-th</span>
+<span class="sd">                eta value.</span>
+<span class="sd">            X_pending:  A `m x d`-dim Tensor of `m` design points that have</span>
+<span class="sd">                points that have been submitted for function evaluation</span>
+<span class="sd">                but have not yet been evaluated.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">)</span>
+        <span class="n">MCSamplerMixin</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sampler</span><span class="o">=</span><span class="n">sampler</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">objective</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">objective</span> <span class="o">=</span> <span class="n">IdentityMCMultiOutputObjective</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">objective</span><span class="p">,</span> <span class="n">MCMultiOutputObjective</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">UnsupportedError</span><span class="p">(</span>
+                <span class="s2">&quot;Only objectives of type MCMultiOutputObjective are supported for &quot;</span>
+                <span class="s2">&quot;Multi-Objective MC acquisition functions.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="nb">hasattr</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="s2">&quot;input_transform&quot;</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">input_transform</span><span class="p">,</span> <span class="n">InputPerturbation</span><span class="p">)</span>
+            <span class="ow">and</span> <span class="n">constraints</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+        <span class="p">):</span>
+            <span class="k">raise</span> <span class="n">UnsupportedError</span><span class="p">(</span>
+                <span class="s2">&quot;Constraints are not supported with input perturbations, due to&quot;</span>
+                <span class="s2">&quot;sample q-batch shape being different than that of the inputs.&quot;</span>
+                <span class="s2">&quot;Use a composite objective that applies feasibility weighting to&quot;</span>
+                <span class="s2">&quot;samples before calculating the risk measure.&quot;</span>
+            <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">add_module</span><span class="p">(</span><span class="s2">&quot;objective&quot;</span><span class="p">,</span> <span class="n">objective</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">constraints</span> <span class="o">=</span> <span class="n">constraints</span>
+        <span class="k">if</span> <span class="n">constraints</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">eta</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="n">Tensor</span><span class="p">:</span>
+                <span class="n">eta</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">full</span><span class="p">((</span><span class="nb">len</span><span class="p">(</span><span class="n">constraints</span><span class="p">),),</span> <span class="n">eta</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">register_buffer</span><span class="p">(</span><span class="s2">&quot;eta&quot;</span><span class="p">,</span> <span class="n">eta</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">X_pending</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">X_pending</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">set_X_pending</span><span class="p">(</span><span class="n">X_pending</span><span class="p">)</span>
+
+<div class="viewcode-block" id="MultiObjectiveMCAcquisitionFunction.forward">
+<a class="viewcode-back" href="../../../../acquisition.html#botorch.acquisition.multi_objective.base.MultiObjectiveMCAcquisitionFunction.forward">[docs]</a>
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">X</span><span class="p">:</span> <span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tensor</span><span class="p">:</span>
+<span class="w">        </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Takes in a `batch_shape x q x d` X Tensor of t-batches with `q` `d`-dim</span>
+<span class="sd">        design points each, and returns a Tensor with shape `batch_shape&#39;`, where</span>
+<span class="sd">        `batch_shape&#39;` is the broadcasted batch shape of model and input `X`. Should</span>
+<span class="sd">        utilize the result of `set_X_pending` as needed to account for pending function</span>
+<span class="sd">        evaluations.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">pass</span>  <span class="c1"># pragma: no cover</span></div>
+</div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p></p>
+  </div>
+
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
