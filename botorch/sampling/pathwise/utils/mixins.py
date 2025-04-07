@@ -22,7 +22,7 @@ from typing import (
 
 from botorch.models.transforms.input import InputTransform
 from botorch.models.transforms.outcome import OutcomeTransform
-from botorch.utils.types import cast
+# from botorch.utils.types import cast
 from torch import Tensor
 from torch.nn import Module, ModuleDict, ModuleList
 
@@ -49,6 +49,7 @@ class TransformedModuleMixin(Module):
     output_transform: Optional[TOutputTransform]
 
     def __init__(self):
+        """Initialize the TransformedModuleMixin with default transforms."""
         # Initialize Module first to ensure proper PyTorch behavior
         super().__init__()
         self.input_transform = None
@@ -64,7 +65,7 @@ class TransformedModuleMixin(Module):
                 else input_transform(values)
             )
 
-        # Call forward instead of super().__call__ since we're implementing the interface
+        # Call forward() - bypassing super().__call__ to implement interface
         output = self.forward(values, *args, **kwargs)
 
         # Apply output transform if present

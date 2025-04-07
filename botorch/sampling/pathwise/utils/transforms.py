@@ -12,6 +12,7 @@ from typing import Any, Iterable, Optional, Union
 import torch
 from botorch.models.transforms.outcome import OutcomeTransform
 from gpytorch.kernels import ScaleKernel
+from gpytorch.kernels.kernel import Kernel
 from torch import LongTensor, Tensor
 from torch.nn import Module, ModuleList
 
@@ -69,6 +70,11 @@ class SineCosineTransform(TensorTransform):
     r"""A transform that returns concatenated sine and cosine features."""
 
     def __init__(self, scale: Optional[Tensor] = None):
+        """Initialize SineCosineTransform with optional scaling.
+
+        Args:
+            scale: Optional tensor to scale the transform output
+        """
         super().__init__()
         self.register_buffer(
             "scale", torch.as_tensor(scale) if scale is not None else None
