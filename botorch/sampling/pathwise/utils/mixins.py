@@ -35,7 +35,7 @@ TOutputTransform = Union[OutcomeTransform, Callable[[Tensor], Tensor]]
 
 class TransformedModuleMixin(Module):
     r"""Mixin that wraps a module's __call__ method with optional transforms.
-    
+
     This mixin provides functionality to transform inputs before processing and outputs
     after processing. It inherits from Module to ensure proper PyTorch module behavior
     and requires subclasses to implement the forward method.
@@ -44,6 +44,7 @@ class TransformedModuleMixin(Module):
         input_transform: Optional transform applied to input values before forward pass
         output_transform: Optional transform applied to output values after forward pass
     """
+
     input_transform: Optional[TInputTransform]
     output_transform: Optional[TOutputTransform]
 
@@ -65,7 +66,7 @@ class TransformedModuleMixin(Module):
 
         # Call forward instead of super().__call__ since we're implementing the interface
         output = self.forward(values, *args, **kwargs)
-        
+
         # Apply output transform if present
         output_transform = getattr(self, "output_transform", None)
         if output_transform is None:
@@ -80,7 +81,7 @@ class TransformedModuleMixin(Module):
     @abstractmethod
     def forward(self, values: Tensor, *args: Any, **kwargs: Any) -> Tensor:
         """Abstract method that must be implemented by subclasses.
-        
+
         This enforces the PyTorch pattern of implementing computation in forward().
         """
         pass
@@ -88,7 +89,7 @@ class TransformedModuleMixin(Module):
 
 class ModuleDictMixin(ABC, Generic[TModule]):
     r"""Mixin that provides dictionary-like access to a ModuleDict.
-    
+
     This mixin allows a class to behave like a dictionary of modules while ensuring
     proper PyTorch module registration and parameter tracking. It uses a unique name
     for the underlying ModuleDict to avoid attribute conflicts.
@@ -99,7 +100,7 @@ class ModuleDictMixin(ABC, Generic[TModule]):
 
     def __init__(self, attr_name: str, modules: Optional[Mapping[str, TModule]] = None):
         r"""Initialize ModuleDictMixin.
-        
+
         Args:
             attr_name: Base name for the ModuleDict attribute
             modules: Optional initial mapping of module names to modules
@@ -108,8 +109,7 @@ class ModuleDictMixin(ABC, Generic[TModule]):
         self.__module_dict_name = f"_{attr_name}_dict"
         # Create and register the ModuleDict
         self.register_module(
-            self.__module_dict_name,
-            ModuleDict({} if modules is None else modules)
+            self.__module_dict_name, ModuleDict({} if modules is None else modules)
         )
 
     @property
@@ -157,7 +157,7 @@ class ModuleDictMixin(ABC, Generic[TModule]):
 
 class ModuleListMixin(ABC, Generic[TModule]):
     r"""Mixin that provides list-like access to a ModuleList.
-    
+
     This mixin allows a class to behave like a list of modules while ensuring
     proper PyTorch module registration and parameter tracking. It uses a unique name
     for the underlying ModuleList to avoid attribute conflicts.
@@ -168,7 +168,7 @@ class ModuleListMixin(ABC, Generic[TModule]):
 
     def __init__(self, attr_name: str, modules: Optional[Iterable[TModule]] = None):
         r"""Initialize ModuleListMixin.
-        
+
         Args:
             attr_name: Base name for the ModuleList attribute
             modules: Optional initial iterable of modules
@@ -177,8 +177,7 @@ class ModuleListMixin(ABC, Generic[TModule]):
         self.__module_list_name = f"_{attr_name}_list"
         # Create and register the ModuleList
         self.register_module(
-            self.__module_list_name,
-            ModuleList([] if modules is None else modules)
+            self.__module_list_name, ModuleList([] if modules is None else modules)
         )
 
     @property
@@ -205,4 +204,4 @@ class ModuleListMixin(ABC, Generic[TModule]):
 
     def __setitem__(self, key: int, val: TModule) -> None:
         """Set a module by index."""
-        self.__module_list[key] = val 
+        self.__module_list[key] = val

@@ -17,6 +17,8 @@ r"""
 
 from __future__ import annotations
 
+from typing import Any, Optional
+
 import torch
 from botorch.exceptions.errors import UnsupportedError
 from botorch.models.approximate_gp import ApproximateGPyTorchModel
@@ -45,7 +47,6 @@ from botorch.utils.transforms import is_ensemble
 from gpytorch.models import ApproximateGP, ExactGP, GP
 from gpytorch.variational import _VariationalStrategy
 from torch import Size
-from typing import Any, Optional
 
 DrawMatheronPaths = Dispatcher("draw_matheron_paths")
 

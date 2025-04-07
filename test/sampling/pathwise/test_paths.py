@@ -15,6 +15,7 @@ from torch.nn import ModuleDict, ModuleList
 
 class IdentityPath(SamplePath):
     """Simple path that returns input unchanged, used for testing."""
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x
 
@@ -28,7 +29,9 @@ class TestGenericPaths(BotorchTestCase):
         - Error handling for invalid configurations
         """
         # Test error when output_transform provided without reducer
-        with self.assertRaisesRegex(UnsupportedError, "must be preceded by a `reducer`"):
+        with self.assertRaisesRegex(
+            UnsupportedError, "must be preceded by a `reducer`"
+        ):
             PathDict(output_transform="foo")
 
         # Create test paths
@@ -92,13 +95,15 @@ class TestGenericPaths(BotorchTestCase):
         - Error handling for invalid configurations
         """
         # Test error when output_transform provided without reducer
-        with self.assertRaisesRegex(UnsupportedError, "must be preceded by a `reducer`"):
+        with self.assertRaisesRegex(
+            UnsupportedError, "must be preceded by a `reducer`"
+        ):
             PathList(output_transform="foo")
 
         # Create test paths
         A = IdentityPath()
         B = IdentityPath()
-        
+
         # Test initialization with list vs ModuleList
         module_list = ModuleList((A, B))
         path_list = PathList(paths=list(module_list))

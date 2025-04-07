@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import torch
 from botorch.models import SingleTaskGP, SingleTaskVariationalGP
@@ -48,19 +48,20 @@ class DummyModule(Module):
 
 class TestMixins(BotorchTestCase):
     """Test cases for the mixin classes in botorch.sampling.pathwise.utils.mixins.
-    
+
     These tests verify that the mixins properly integrate with PyTorch's Module system
     and provide the expected container-like interfaces.
     """
 
     def test_module_dict_mixin(self):
         """Test ModuleDictMixin's dictionary-like interface and module registration.
-        
+
         This test verifies that:
         1. The mixin properly initializes with Module
         2. Dictionary operations work as expected
         3. Modules are properly registered and tracked
         """
+
         class TestDict(Module, ModuleDictMixin[DummyModule]):
             def __init__(self):
                 Module.__init__(self)  # Initialize Module first
@@ -84,12 +85,13 @@ class TestMixins(BotorchTestCase):
 
     def test_module_list_mixin(self):
         """Test ModuleListMixin's list-like interface and module registration.
-        
+
         This test verifies that:
         1. The mixin properly initializes with Module
         2. List operations work as expected
         3. Modules are properly registered and tracked
         """
+
         class TestList(Module, ModuleListMixin[DummyModule]):
             def __init__(self):
                 Module.__init__(self)  # Initialize Module first
@@ -113,12 +115,13 @@ class TestMixins(BotorchTestCase):
 
     def test_transformed_module_mixin(self):
         """Test TransformedModuleMixin's transform application functionality.
-        
+
         This test verifies that:
         1. The mixin properly handles input and output transforms
         2. Transforms are applied in the correct order
         3. The module works without transforms
         """
+
         class TestModule(TransformedModuleMixin):
             def forward(self, x: Tensor) -> Tensor:
                 return x
@@ -160,9 +163,7 @@ class TestTransforms(BotorchTestCase):
     def test_sine_cosine_transform(self):
         x = torch.randn(3)
         transform = SineCosineTransform()
-        self.assertTrue(
-            torch.concat([x.sin(), x.cos()], dim=-1).equal(transform(x))
-        )
+        self.assertTrue(torch.concat([x.sin(), x.cos()], dim=-1).equal(transform(x)))
 
     def test_outcome_untransformer(self):
         for untransformer in (
@@ -184,11 +185,9 @@ class TestHelpers(BotorchTestCase):
         self.assertTrue(kernel_instancecheck(scale, kernels.RBFKernel))
         self.assertFalse(kernel_instancecheck(base, kernels.MaternKernel))
         self.assertTrue(
-            kernel_instancecheck(
-                scale, (kernels.RBFKernel, kernels.MaternKernel), any
-            )
+            kernel_instancecheck(scale, (kernels.RBFKernel, kernels.MaternKernel), any)
         )
-        # Test all reducer - should be false since scale kernel is not both RBF and Matern
+        # Test all reducer - should be false (scale kernel is not both RBF & Matern)
         self.assertFalse(
             kernel_instancecheck(
                 scale, (kernels.RBFKernel, kernels.MaternKernel), all, max_depth=0

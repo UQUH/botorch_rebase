@@ -52,13 +52,13 @@ def kernel_instancecheck(
     max_depth: int = maxsize,
 ) -> bool:
     """Check if a kernel is an instance of specified kernel type(s).
-    
+
     Args:
         kernel: The kernel to check
         types: Single kernel type or tuple of kernel types to check against
         reducer: Function to reduce multiple boolean checks (default: any)
         max_depth: Maximum depth to search in kernel hierarchy
-        
+
     Returns:
         bool: Whether kernel matches the specified type(s)
     """
@@ -77,11 +77,11 @@ def kernel_instancecheck(
 
 def is_finite_dimensional(kernel: Kernel, max_depth: int = maxsize) -> bool:
     """Check if a kernel has a finite-dimensional feature map.
-    
+
     Args:
         kernel: The kernel to check
         max_depth: Maximum depth to search in kernel hierarchy
-        
+
     Returns:
         bool: Whether kernel has finite-dimensional feature map
     """
@@ -95,11 +95,11 @@ def sparse_block_diag(
     base_ndim: int = 2,
 ) -> Tensor:
     """Creates a sparse block diagonal tensor from a list of tensors.
-    
+
     Args:
         blocks: Iterable of tensors to arrange diagonally
         base_ndim: Number of dimensions to treat as matrix dimensions
-        
+
     Returns:
         Tensor: Sparse block diagonal tensor
     """
@@ -108,7 +108,7 @@ def sparse_block_diag(
     indices = []
     shape = torch.zeros(base_ndim, 1, dtype=torch.long, device=device)
     batch_shapes = []
-    
+
     for blk in blocks:
         batch_shapes.append(blk.shape[:-base_ndim])
         if isinstance(blk, LinearOperator):
@@ -136,7 +136,7 @@ def append_transform(
     transform: Union[InputTransform, OutcomeTransform, TensorTransform],
 ) -> None:
     """Appends a transform to a module's transform chain.
-    
+
     Args:
         module: Module to append transform to
         attr_name: Name of transform attribute
@@ -155,7 +155,7 @@ def prepend_transform(
     transform: Union[InputTransform, OutcomeTransform, TensorTransform],
 ) -> None:
     """Prepends a transform to a module's transform chain.
-    
+
     Args:
         module: Module to prepend transform to
         attr_name: Name of transform attribute
@@ -175,13 +175,13 @@ def untransform_shape(
     dtype: Optional[torch.dtype] = None,
 ) -> Size:
     """Gets the shape after applying an inverse transform.
-    
+
     Args:
         transform: Transform to invert
         shape: Input shape
         device: Optional device for test tensor
         dtype: Optional dtype for test tensor
-        
+
     Returns:
         Size: Shape after inverse transform
     """
@@ -198,7 +198,7 @@ def untransform_shape(
     else:
         result = transform(test_case)
 
-    return result.shape[-test_case.ndim:]
+    return result.shape[-test_case.ndim :]
 
 
 def get_kernel_num_inputs(
@@ -337,4 +337,4 @@ def _get_train_targets_SingleTaskVariationalGP(
 def _get_train_targets_ModelList(
     model: ModelList, transformed: bool = False
 ) -> List[...]:
-    return [get_train_targets(m, transformed=transformed) for m in model.models] 
+    return [get_train_targets(m, transformed=transformed) for m in model.models]

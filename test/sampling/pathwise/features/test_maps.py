@@ -21,6 +21,7 @@ from torch.nn import Module
 
 from ..helpers import gen_module, TestCaseConfig
 
+
 # TestFeatureMaps: Tests for various feature map implementations
 # - Tests base feature map functionality
 # - Verifies direct sum, Hadamard product, and outer product operations
@@ -105,14 +106,18 @@ class TestFeatureMaps(BotorchTestCase):
         # Test forward pass
         d = self.config.num_inputs
         batch_shape = Size([16])
-        X = torch.rand((*batch_shape, d), device=self.config.device, dtype=self.config.dtype)
+        X = torch.rand(
+            (*batch_shape, d), device=self.config.device, dtype=self.config.dtype
+        )
         features = feature_map(X).to_dense()
-        
+
         # Check output shape - should be [*batch_shape, *output_shape]
         # Note: The feature map's batch shape comes first, then our input batch shape
-        expected_shape = Size([*feature_map.batch_shape, *batch_shape, *feature_map.output_shape[-1:]])
+        expected_shape = Size(
+            [*feature_map.batch_shape, *batch_shape, *feature_map.output_shape[-1:]]
+        )
         self.assertEqual(features.shape, expected_shape)
-        
+
         # Check concatenation
         expected_features = torch.concat([f(X).to_dense() for f in feature_map], dim=-1)
         self.assertTrue(features.equal(expected_features))
@@ -138,7 +143,7 @@ class TestFeatureMaps(BotorchTestCase):
         X = torch.rand((16, d), device=self.config.device, dtype=self.config.dtype)
         features = feature_map(X).to_dense()
         self.assertEqual(
-            features.shape[-len(feature_map.output_shape):],
+            features.shape[-len(feature_map.output_shape) :],
             feature_map.output_shape,
         )
         self.assertTrue(features.equal(prod([f(X).to_dense() for f in feature_map])))
@@ -164,7 +169,7 @@ class TestFeatureMaps(BotorchTestCase):
         X = torch.rand((16, d), device=self.config.device, dtype=self.config.dtype)
         features = feature_map(X).to_dense()
         self.assertEqual(
-            features.shape[-len(feature_map.output_shape):],
+            features.shape[-len(feature_map.output_shape) :],
             feature_map.output_shape,
         )
 
@@ -174,6 +179,7 @@ class TestFeatureMaps(BotorchTestCase):
             * feature_map[1](X).to_dense().unsqueeze(-2)
         ).view(features.shape)
         self.assertTrue(features.equal(test_features))
+
 
 # TestKernelFeatureMaps: Tests for kernel-specific feature maps
 # - Tests Fourier feature maps
@@ -217,7 +223,7 @@ class TestKernelFeatureMaps(BotorchTestCase):
             X = torch.rand(32, config.num_inputs, **tkwargs)
             features = feature_map(X)
             self.assertEqual(
-                features.shape[-len(feature_map.output_shape):],
+                features.shape[-len(feature_map.output_shape) :],
                 feature_map.output_shape,
             )
             self.assertTrue(
@@ -245,7 +251,7 @@ class TestKernelFeatureMaps(BotorchTestCase):
             indices = indices.long().squeeze(-1)
             features = feature_map(X).to_dense()
             self.assertEqual(
-                features.shape[-len(feature_map.output_shape):],
+                features.shape[-len(feature_map.output_shape) :],
                 feature_map.output_shape,
             )
 
@@ -282,7 +288,7 @@ class TestKernelFeatureMaps(BotorchTestCase):
             X = torch.rand(*kernel.batch_shape, 16, config.num_inputs, **tkwargs)
             features = feature_map(X).to_dense()
             self.assertEqual(
-                features.shape[-len(feature_map.output_shape):],
+                features.shape[-len(feature_map.output_shape) :],
                 feature_map.output_shape,
             )
             self.assertTrue(
@@ -317,7 +323,7 @@ class TestKernelFeatureMaps(BotorchTestCase):
 
             features = feature_map(X).to_dense()
             self.assertEqual(
-                features.shape[-len(feature_map.output_shape):],
+                features.shape[-len(feature_map.output_shape) :],
                 feature_map.output_shape,
             )
             cholesky = kernel.task_covar_module.covar_matrix.cholesky()

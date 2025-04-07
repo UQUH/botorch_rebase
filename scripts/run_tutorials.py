@@ -22,13 +22,13 @@ RUN_IF_SMOKE_TEST_IGNORE_IF_STANDARD = set()  # only used in smoke tests
 
 # Add tutorials that require pretrained models or frequently fail in CI to ignore list in smoke test mode
 IGNORE_IN_SMOKE_TEST = {
-    "vae_mnist.ipynb",        # Requires pretrained models
-    "preference_bo.ipynb",    # May be unstable in CI
+    "vae_mnist.ipynb",  # Requires pretrained models
+    "preference_bo.ipynb",  # May be unstable in CI
     "custom_botorch_model_in_ax.ipynb",  # May have compatibility issues
-    "bope.ipynb",             # Can have numerical stability issues
+    "bope.ipynb",  # Can have numerical stability issues
     "constraint_active_search.ipynb",  # May time out or have convergence issues
-    "ibnn_bo.ipynb",          # Potentially computationally intensive
-    "composite_mtbo.ipynb",   # May have convergence issues in CI environment
+    "ibnn_bo.ipynb",  # Potentially computationally intensive
+    "composite_mtbo.ipynb",  # May have convergence issues in CI environment
 }  # ignore in smoke tests only
 
 
@@ -114,7 +114,7 @@ def run_tutorials(
         if smoke_test
         else IGNORE_ALWAYS | RUN_IF_SMOKE_TEST_IGNORE_IF_STANDARD
     )
-    
+
     # Add tutorials that require pretrained models to ignore list in smoke test mode
     if smoke_test:
         ignored_tutorials = ignored_tutorials.union(IGNORE_IN_SMOKE_TEST)

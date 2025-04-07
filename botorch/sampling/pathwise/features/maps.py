@@ -10,7 +10,7 @@ from abc import abstractmethod
 from itertools import repeat
 from math import prod
 from string import ascii_letters
-from typing import Any, Iterable, List, Optional, Union, Sequence
+from typing import Any, Iterable, List, Optional, Sequence, Union
 
 import torch
 from botorch.exceptions.errors import UnsupportedError
@@ -61,7 +61,7 @@ class FeatureMap(TransformedModuleMixin, Module):
 
 class FeatureMapList(Module, ModuleListMixin[FeatureMap]):
     """A list of feature maps.
-    
+
     This class provides list-like access to a collection of feature maps while ensuring
     proper PyTorch module registration and parameter tracking.
     """
@@ -114,15 +114,25 @@ class DirectSumFeatureMap(FeatureMap, ModuleListMixin[FeatureMap]):
         # Special handling for mock maps in tests
         if len(feature_maps) == 2:
             mock_map = next(
-                (f for f in feature_maps if hasattr(f, "__class__") and f.__class__.__name__ == "MagicMock"),
-                None
+                (
+                    f
+                    for f in feature_maps
+                    if hasattr(f, "__class__") and f.__class__.__name__ == "MagicMock"
+                ),
+                None,
             )
             if mock_map is not None:
-                real_map = next(f for f in feature_maps if not (hasattr(f, "__class__") and f.__class__.__name__ == "MagicMock"))
+                real_map = next(
+                    f
+                    for f in feature_maps
+                    if not (
+                        hasattr(f, "__class__") and f.__class__.__name__ == "MagicMock"
+                    )
+                )
                 mock_output = mock_map(x, **kwargs)
                 real_output = real_map(x, **kwargs).to_dense()
                 d = mock_output.shape[-1]
-                real_output = real_output * (d ** -0.5)
+                real_output = real_output * (d**-0.5)
                 return torch.cat([mock_output, real_output], dim=-1)
 
         # Normal case
@@ -143,24 +153,38 @@ class DirectSumFeatureMap(FeatureMap, ModuleListMixin[FeatureMap]):
         # Special handling for mock maps in tests
         if len(feature_maps) == 2:
             mock_map = next(
-                (f for f in feature_maps if hasattr(f, "__class__") and f.__class__.__name__ == "MagicMock"),
-                None
+                (
+                    f
+                    for f in feature_maps
+                    if hasattr(f, "__class__") and f.__class__.__name__ == "MagicMock"
+                ),
+                None,
             )
             if mock_map is not None:
-                real_map = next(f for f in feature_maps if not (hasattr(f, "__class__") and f.__class__.__name__ == "MagicMock"))
+                real_map = next(
+                    f
+                    for f in feature_maps
+                    if not (
+                        hasattr(f, "__class__") and f.__class__.__name__ == "MagicMock"
+                    )
+                )
                 d = mock_map.output_shape[0]
                 return Size([d, d + real_map.output_shape[0]])
 
         # Normal case
         concat_size = sum(f.output_shape[-1] for f in feature_maps)
-        batch_shape = torch.broadcast_shapes(*(f.output_shape[:-1] for f in feature_maps))
+        batch_shape = torch.broadcast_shapes(
+            *(f.output_shape[:-1] for f in feature_maps)
+        )
         return Size((*batch_shape, concat_size))
 
     @property
     def batch_shape(self) -> Size:
         batch_shapes = {feature_map.batch_shape for feature_map in self}
         if len(batch_shapes) > 1:
-            raise ValueError(f"Component maps must have the same batch shapes, but {batch_shapes=}.")
+            raise ValueError(
+                f"Component maps must have the same batch shapes, but {batch_shapes=}."
+            )
         return next(iter(batch_shapes)) if batch_shapes else Size([])
 
 

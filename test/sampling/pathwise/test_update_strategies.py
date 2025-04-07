@@ -65,9 +65,7 @@ class TestGaussianUpdates(BotorchTestCase):
                 (X,) = get_train_inputs(model, transformed=False)
                 (Z,) = get_train_inputs(model, transformed=True)
                 target_values = get_train_targets(model, transformed=True)
-                noise_values = torch.randn(
-                    *target_values.shape, **tkwargs
-                )
+                noise_values = torch.randn(*target_values.shape, **tkwargs)
                 Kmm = model.forward(X if model.training else Z).lazy_covariance_matrix
                 Kuu = Kmm + model.likelihood.noise_covar(shape=Z.shape[:-1])
 
@@ -77,7 +75,9 @@ class TestGaussianUpdates(BotorchTestCase):
                 "randn",
                 return_value=noise_values,
             ):
-                prior_paths = draw_kernel_feature_paths(model, sample_shape=sample_shape)
+                prior_paths = draw_kernel_feature_paths(
+                    model, sample_shape=sample_shape
+                )
                 sample_values = prior_paths(X)
 
                 # For MultiTaskGP, we need to handle the task dimension correctly
@@ -110,14 +110,18 @@ class TestGaussianUpdates(BotorchTestCase):
                     @ noise_values.unsqueeze(-1)
                 ).squeeze(-1)
             weight = torch.cholesky_solve(errors.unsqueeze(-1), Luu).squeeze(-1)
-            
+
             # Add debugging info
             print("\nDebugging weight mismatch:")
             print(f"Expected weight shape: {weight.shape}")
             print(f"Actual weight shape: {update_paths.weight.shape}")
-            print(f"Max absolute difference: {(weight - update_paths.weight).abs().max()}")
-            print(f"Relative difference: {(weight - update_paths.weight).abs().mean() / weight.abs().mean()}")
-            
+            print(
+                f"Max absolute difference: {(weight - update_paths.weight).abs().max()}"
+            )
+            print(
+                f"Relative difference: {(weight - update_paths.weight).abs().mean() / weight.abs().mean()}"
+            )
+
             # Use higher tolerance for numerical stability
             self.assertTrue(weight.allclose(update_paths.weight, rtol=1e-3, atol=1e-3))
 
@@ -129,7 +133,9 @@ class TestGaussianUpdates(BotorchTestCase):
                 else Z2
             )
             features = update_paths.feature_map(X2)
-            expected_updates = (features @ update_paths.weight.unsqueeze(-1)).squeeze(-1)
+            expected_updates = (features @ update_paths.weight.unsqueeze(-1)).squeeze(
+                -1
+            )
             actual_updates = update_paths(X2)
             self.assertTrue(actual_updates.allclose(expected_updates))
 
@@ -149,7 +155,9 @@ class TestGaussianUpdates(BotorchTestCase):
             if isinstance(model, models.SingleTaskVariationalGP):
                 # Test passing non-zero `noise_covariance`
                 with patch.object(model, "likelihood", new=BernoulliLikelihood()):
-                    with self.assertRaisesRegex(NotImplementedError, "not yet supported"):
+                    with self.assertRaisesRegex(
+                        NotImplementedError, "not yet supported"
+                    ):
                         gaussian_update(
                             model=model,
                             sample_values=sample_values,
@@ -189,17 +197,15 @@ class TestGaussianUpdates(BotorchTestCase):
         sample_shape = torch.Size([3])
         for config, model_list in self.model_lists:
             tkwargs = {"device": config.device, "dtype": config.dtype}
-            
+
             # Get reference inputs and targets from first model
             # We use these as a baseline for testing
             (X,) = get_train_inputs(model_list.models[0], transformed=False)
             (Z,) = get_train_inputs(model_list.models[0], transformed=True)
             target_values = get_train_targets(model_list.models[0], transformed=True)
-            
+
             # Generate controlled noise values for reproducible testing
-            noise_values = torch.randn(
-                *sample_shape, *target_values.shape, **tkwargs
-            )
+            noise_values = torch.randn(*sample_shape, *target_values.shape, **tkwargs)
 
             # Test with controlled environment:
             # - No outcome transform to simplify validation
@@ -210,9 +216,11 @@ class TestGaussianUpdates(BotorchTestCase):
                 return_value=noise_values,
             ):
                 # Generate prior paths and get sample values
-                prior_paths = draw_kernel_feature_paths(model_list, sample_shape=sample_shape)
+                prior_paths = draw_kernel_feature_paths(
+                    model_list, sample_shape=sample_shape
+                )
                 sample_values = prior_paths(X)
-                
+
                 # Apply gaussian update with tensor inputs
                 # This tests the input splitting functionality
                 update_paths = gaussian_update(
@@ -227,18 +235,20 @@ class TestGaussianUpdates(BotorchTestCase):
 
             # Test forward pass with new inputs
             # Generate transformed inputs for validation
-            Z2 = gen_random_inputs(model_list.models[0], batch_shape=[16], transformed=True)
+            Z2 = gen_random_inputs(
+                model_list.models[0], batch_shape=[16], transformed=True
+            )
             X2 = (
                 model_list.models[0].input_transform.untransform(Z2)
                 if hasattr(model_list.models[0], "input_transform")
                 else Z2
             )
-            
+
             # Verify output structure and values
             sample_list = update_paths(X2)
             self.assertIsInstance(sample_list, list)
             self.assertEqual(len(sample_list), len(model_list.models))
-            
+
             # Verify each path produces correct output
             # Each submodel's path should match its corresponding sample
             for path, sample in zip(update_paths, sample_list):

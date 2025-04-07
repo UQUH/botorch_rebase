@@ -14,12 +14,12 @@ NoneType = type(None)  # stop gap for the return of NoneType in 3.10
 
 def cast(typ: Type[T], obj: Any, optional: bool = False) -> T:
     """Cast an object to a type, optionally allowing None.
-    
+
     Args:
         typ: Type to cast to
         obj: Object to cast
         optional: Whether to allow None
-        
+
     Returns:
         Cast object
     """

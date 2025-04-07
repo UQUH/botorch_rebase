@@ -116,9 +116,11 @@ class TestDrawMatheronPaths(BotorchTestCase):
                         samples, _ = model.outcome_transform(samples.unsqueeze(-1))
                         samples = samples.squeeze(-1)
 
-                samples = istd * samples.view(-1, *samples.shape[len(sample_shape):])
+                samples = istd * samples.view(-1, *samples.shape[len(sample_shape) :])
                 sample_mean = samples.mean(dim=0)
-                sample_covar = (samples - sample_mean).permute(*range(1, samples.ndim), 0)
+                sample_covar = (samples - sample_mean).permute(
+                    *range(1, samples.ndim), 0
+                )
                 sample_covar = torch.divide(
                     sample_covar @ sample_covar.transpose(-2, -1), sample_shape.numel()
                 )

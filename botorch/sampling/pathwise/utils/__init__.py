@@ -30,10 +30,10 @@ from botorch.sampling.pathwise.utils.transforms import (
     CosineTransform,
     FeatureSelector,
     InverseLengthscaleTransform,
+    OutcomeUntransformer,
     OutputscaleTransform,
     SineCosineTransform,
     TensorTransform,
-    OutcomeUntransformer,
 )
 
 __all__ = [
@@ -62,4 +62,4 @@ __all__ = [
     "TransformedModuleMixin",
     "OutcomeUntransformer",
     "untransform_shape",
-] 
+]

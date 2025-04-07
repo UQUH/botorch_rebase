@@ -70,7 +70,9 @@ class SineCosineTransform(TensorTransform):
 
     def __init__(self, scale: Optional[Tensor] = None):
         super().__init__()
-        self.register_buffer("scale", torch.as_tensor(scale) if scale is not None else None)
+        self.register_buffer(
+            "scale", torch.as_tensor(scale) if scale is not None else None
+        )
 
     def forward(self, values: Tensor) -> Tensor:
         sincos = torch.concat([values.sin(), values.cos()], dim=-1)
@@ -169,4 +171,4 @@ class OutcomeUntransformer(TensorTransform):
 
         # BoTorch has moved the output dimension inside as the final batch dimension.
         output_values, _ = self.transform.untransform(values.transpose(-2, -1))
-        return output_values.transpose(-2, -1) 
+        return output_values.transpose(-2, -1)

@@ -54,6 +54,7 @@ TKernelFeatureMapGenerator = Callable[[kernels.Kernel, int, int], KernelFeatureM
 # new handler functions registered to this dispatcher.
 GenKernelFeatureMap = Dispatcher("gen_kernel_feature_map")
 
+
 def gen_kernel_feature_map(
     kernel: kernels.Kernel,
     num_random_features: int = 1024,
@@ -85,6 +86,7 @@ def gen_kernel_feature_map(
         num_random_features=num_random_features,
         **kwargs,
     )
+
 
 def _gen_fourier_features(
     kernel: kernels.Kernel,
@@ -118,7 +120,7 @@ def _gen_fourier_features(
     # the original implementation to support the cosine_only option, which is critical for
     # the ProductKernel implementation where we need to avoid the tensor product of sine and
     # cosine features.
-    
+
     if not cosine_only and num_random_features % 2:
         raise UnsupportedError(
             f"Expected an even number of random features, but {num_random_features=}."
@@ -127,7 +129,7 @@ def _gen_fourier_features(
     # Get the appropriate number of inputs based on kernel configuration
     num_inputs = get_kernel_num_inputs(kernel, num_ambient_inputs=num_inputs)
     input_transform = transforms.InverseLengthscaleTransform(kernel)
-    
+
     # Handle active dimensions if specified
     if kernel.active_dims is not None:
         num_inputs = len(kernel.active_dims)
@@ -148,7 +150,11 @@ def _gen_fourier_features(
         # IMPLEMENTATION NOTE: When cosine_only is True, we use cosine features with random phases
         # instead of paired sine and cosine features. This is important for ProductKernel where
         # we need to take element-wise products of features.
-        bias = 2 * torch.pi * torch.rand(num_random_features, device=kernel.device, dtype=kernel.dtype)
+        bias = (
+            2
+            * torch.pi
+            * torch.rand(num_random_features, device=kernel.device, dtype=kernel.dtype)
+        )
         num_raw_features = num_random_features
     else:
         bias = None
@@ -167,6 +173,7 @@ def _gen_fourier_features(
         input_transform=input_transform,
         output_transform=transforms.ChainedTransform(*output_transforms),
     )
+
 
 @GenKernelFeatureMap.register(kernels.RBFKernel)
 def _gen_kernel_feature_map_rbf(
@@ -198,6 +205,7 @@ def _gen_kernel_feature_map_rbf(
         **kwargs,
     )
 
+
 @GenKernelFeatureMap.register(kernels.MaternKernel)
 def _gen_kernel_feature_map_matern(
     kernel: kernels.MaternKernel,
@@ -227,6 +235,7 @@ def _gen_kernel_feature_map_matern(
         weight_generator=_weight_generator,
         **kwargs,
     )
+
 
 @GenKernelFeatureMap.register(kernels.ScaleKernel)
 def _gen_kernel_feature_map_scale(
@@ -258,6 +267,7 @@ def _gen_kernel_feature_map_scale(
     )
     return feature_map
 
+
 @GenKernelFeatureMap.register(kernels.ProductKernel)
 def _gen_kernel_feature_map_product(
     kernel: kernels.ProductKernel,
@@ -268,6 +278,7 @@ def _gen_kernel_feature_map_product(
         feature_map = gen_kernel_feature_map(sub_kernel, **kwargs)
         feature_maps.append(feature_map)
     return OuterProductFeatureMap(feature_maps=feature_maps)
+
 
 @GenKernelFeatureMap.register(kernels.AdditiveKernel)
 def _gen_kernel_feature_map_additive(
@@ -280,12 +291,14 @@ def _gen_kernel_feature_map_additive(
         feature_maps.append(feature_map)
     return DirectSumFeatureMap(feature_maps=feature_maps)
 
+
 @GenKernelFeatureMap.register(kernels.IndexKernel)
 def _gen_kernel_feature_map_index(
     kernel: kernels.IndexKernel,
     **kwargs: Any,
 ) -> KernelFeatureMap:
     return IndexKernelFeatureMap(kernel=kernel)
+
 
 @GenKernelFeatureMap.register(kernels.LinearKernel)
 def _gen_kernel_feature_map_linear(
@@ -295,9 +308,8 @@ def _gen_kernel_feature_map_linear(
     **kwargs: Any,
 ) -> KernelFeatureMap:
     num_features = get_kernel_num_inputs(kernel=kernel, num_ambient_inputs=num_inputs)
-    return LinearKernelFeatureMap(
-        kernel=kernel, raw_output_shape=Size([num_features])
-    )
+    return LinearKernelFeatureMap(kernel=kernel, raw_output_shape=Size([num_features]))
+
 
 @GenKernelFeatureMap.register(kernels.MultitaskKernel)
 def _gen_kernel_feature_map_multitask(
@@ -305,9 +317,8 @@ def _gen_kernel_feature_map_multitask(
     **kwargs: Any,
 ) -> KernelFeatureMap:
     data_feature_map = gen_kernel_feature_map(kernel.data_covar_module, **kwargs)
-    return MultitaskKernelFeatureMap(
-        kernel=kernel, data_feature_map=data_feature_map
-    )
+    return MultitaskKernelFeatureMap(kernel=kernel, data_feature_map=data_feature_map)
+
 
 @GenKernelFeatureMap.register(kernels.LCMKernel)
 def _gen_kernel_feature_map_lcm(

@@ -27,27 +27,55 @@ class TestGenKernelFeatureMap(BotorchTestCase):
         self.num_inputs = d = 2
         self.num_random_features = 4096
         self.kernels = []
-        
+
         for kernel in (
             kernels.MaternKernel(nu=0.5, batch_shape=torch.Size([]), ard_num_dims=d),
             kernels.MaternKernel(nu=1.5, ard_num_dims=1, active_dims=[0]),
-            kernels.ScaleKernel(kernels.MaternKernel(nu=2.5, ard_num_dims=d, batch_shape=torch.Size([2]))),
-            kernels.ScaleKernel(kernels.RBFKernel(ard_num_dims=1, batch_shape=torch.Size([2, 2])), active_dims=[1]),
-            kernels.ProductKernel(kernels.RBFKernel(ard_num_dims=d), kernels.MaternKernel(nu=2.5, ard_num_dims=d)),
+            kernels.ScaleKernel(
+                kernels.MaternKernel(
+                    nu=2.5, ard_num_dims=d, batch_shape=torch.Size([2])
+                )
+            ),
+            kernels.ScaleKernel(
+                kernels.RBFKernel(ard_num_dims=1, batch_shape=torch.Size([2, 2])),
+                active_dims=[1],
+            ),
+            kernels.ProductKernel(
+                kernels.RBFKernel(ard_num_dims=d),
+                kernels.MaternKernel(nu=2.5, ard_num_dims=d),
+            ),
         ):
             kernel.to(dtype=torch.float64, device=self.device)
-            kern = kernel.base_kernel if isinstance(kernel, kernels.ScaleKernel) else kernel
-            if hasattr(kern, 'raw_lengthscale'):
+            kern = (
+                kernel.base_kernel
+                if isinstance(kernel, kernels.ScaleKernel)
+                else kernel
+            )
+            if hasattr(kern, "raw_lengthscale"):
                 if isinstance(kern, kernels.MaternKernel):
-                    shape = kern.raw_lengthscale.shape if kern.ard_num_dims is None else torch.Size([*kern.batch_shape, 1, kern.ard_num_dims])
-                    kern.raw_lengthscale = torch.nn.Parameter(torch.zeros(shape, dtype=torch.float64, device=self.device))
+                    shape = (
+                        kern.raw_lengthscale.shape
+                        if kern.ard_num_dims is None
+                        else torch.Size([*kern.batch_shape, 1, kern.ard_num_dims])
+                    )
+                    kern.raw_lengthscale = torch.nn.Parameter(
+                        torch.zeros(shape, dtype=torch.float64, device=self.device)
+                    )
                 elif isinstance(kern, kernels.RBFKernel):
-                    shape = kern.raw_lengthscale.shape if kern.ard_num_dims is None else torch.Size([*kern.batch_shape, 1, kern.ard_num_dims])
-                    kern.raw_lengthscale = torch.nn.Parameter(torch.zeros(shape, dtype=torch.float64, device=self.device))
-                
+                    shape = (
+                        kern.raw_lengthscale.shape
+                        if kern.ard_num_dims is None
+                        else torch.Size([*kern.batch_shape, 1, kern.ard_num_dims])
+                    )
+                    kern.raw_lengthscale = torch.nn.Parameter(
+                        torch.zeros(shape, dtype=torch.float64, device=self.device)
+                    )
+
                 with torch.random.fork_rng():
                     torch.manual_seed(0)
-                    kern.raw_lengthscale.data.add_(torch.rand_like(kern.raw_lengthscale) * 0.2 - 2.0)  # Initialize to small random values
+                    kern.raw_lengthscale.data.add_(
+                        torch.rand_like(kern.raw_lengthscale) * 0.2 - 2.0
+                    )  # Initialize to small random values
 
             self.kernels.append(kernel)
 
@@ -87,7 +115,7 @@ class TestGenKernelFeatureMap(BotorchTestCase):
                         features = feature_map(X)
                         test_shape = torch.broadcast_shapes(
                             (*X.shape[:-1], feature_map.output_shape[0]),
-                            kernel.batch_shape + (1, 1)
+                            kernel.batch_shape + (1, 1),
                         )
                         self.assertEqual(features.shape, test_shape)
 
@@ -99,7 +127,9 @@ class TestGenKernelFeatureMap(BotorchTestCase):
                         K0 = istd.unsqueeze(-1) * K0 * istd.unsqueeze(-2)
                         K1 = istd.unsqueeze(-1) * K1 * istd.unsqueeze(-2)
 
-                        allclose_kwargs = {"atol": slack * self.num_random_features**-0.5}
+                        allclose_kwargs = {
+                            "atol": slack * self.num_random_features**-0.5
+                        }
                         if not is_finite_dimensional(kernel):
                             num_random_features_per_map = self.num_random_features / (
                                 1
@@ -110,7 +140,9 @@ class TestGenKernelFeatureMap(BotorchTestCase):
                                     if k is not kernel
                                 )
                             )
-                            allclose_kwargs["atol"] = slack * num_random_features_per_map**-0.5
+                            allclose_kwargs["atol"] = (
+                                slack * num_random_features_per_map**-0.5
+                            )
 
                         self.assertTrue(K0.allclose(K1, **allclose_kwargs))
 

@@ -87,8 +87,10 @@ def _gaussian_update_exact(
         scale_tril = kernel(points).cholesky() if scale_tril is None else scale_tril
     else:
         # Generate noise values with correct shape
-        noise_shape = sample_values.shape[-len(target_values.shape):]
-        noise_values = torch.randn(noise_shape, device=sample_values.device, dtype=sample_values.dtype)
+        noise_shape = sample_values.shape[-len(target_values.shape) :]
+        noise_values = torch.randn(
+            noise_shape, device=sample_values.device, dtype=sample_values.dtype
+        )
         noise_values = (
             noise_covariance.cholesky() @ noise_values.unsqueeze(-1)
         ).squeeze(-1)
@@ -301,7 +303,9 @@ def _gaussian_update_ApproximateGP_VariationalStrategy(
         base_values = variational_strategy.variational_distribution.rsample(
             sample_values.shape[: sample_values.ndim - len(batch_shape) - 1],
         )
-        target_values = model.mean_module(Z) + (L @ base_values.unsqueeze(-1)).squeeze(-1)
+        target_values = model.mean_module(Z) + (L @ base_values.unsqueeze(-1)).squeeze(
+            -1
+        )
 
     return _gaussian_update_exact(
         kernel=model.covar_module,

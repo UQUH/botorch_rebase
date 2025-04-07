@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from copy import deepcopy
+from dataclasses import replace
 from itertools import product
 from unittest.mock import MagicMock
-from dataclasses import replace
 
 import torch
 from botorch import models
@@ -25,8 +25,8 @@ from botorch.sampling.pathwise import (
 from botorch.sampling.pathwise.utils import get_train_inputs, is_finite_dimensional
 from botorch.utils.test_helpers import get_sample_moments, standardize_moments
 from botorch.utils.testing import BotorchTestCase
-from gpytorch.kernels import MaternKernel, RBFKernel, ScaleKernel
 from gpytorch.distributions import MultitaskMultivariateNormal
+from gpytorch.kernels import MaternKernel, RBFKernel, ScaleKernel
 from torch import Size
 from torch.nn.functional import pad
 
@@ -263,7 +263,7 @@ class TestDrawKernelFeaturePaths(BotorchTestCase):
                 model.outcome_transform.train(mode=model.training)
 
             # Compute sample statistics
-            samples = istd * samples.view(-1, *samples.shape[len(sample_shape):])
+            samples = istd * samples.view(-1, *samples.shape[len(sample_shape) :])
             sample_mean = samples.mean(dim=0)
             sample_covar = (samples - sample_mean).permute(*range(1, samples.ndim), 0)
             sample_covar = torch.divide(

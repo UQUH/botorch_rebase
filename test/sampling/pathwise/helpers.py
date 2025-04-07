@@ -14,8 +14,8 @@ from typing import Any, Callable, Dict, Iterable, Iterator, Optional, Type, Type
 import torch
 from botorch import models
 from botorch.exceptions.errors import UnsupportedError
-from botorch.models.model import Model
 from botorch.models.gp_regression import SingleTaskGP
+from botorch.models.model import Model
 from botorch.models.transforms.input import Normalize
 from botorch.models.transforms.outcome import Standardize
 from botorch.sampling.pathwise.features.generators import gen_kernel_feature_map
@@ -26,6 +26,7 @@ from torch.nn.functional import pad
 
 T = TypeVar("T")
 TFactory = Callable[[], Iterator[T]]
+
 
 # TestCaseConfig: Configuration dataclass for test setup
 # - Provides consistent test parameters across different test cases
@@ -41,6 +42,7 @@ class TestCaseConfig:
     batch_shape: Size = field(default_factory=Size)
     num_random_features: int = 4096
 
+
 # gen_random_inputs: Generates random input tensors for testing
 # - Handles both single-task and multi-task models
 # - Supports transformed/untransformed inputs
@@ -53,18 +55,18 @@ def gen_random_inputs(
     seed: Optional[int] = None,
 ) -> torch.Tensor:
     """Generate random inputs for testing.
-    
+
     Args:
         model: Model to generate inputs for
         batch_shape: Shape of batch dimension
         transformed: Whether to return transformed inputs
         task_id: Optional task ID for multi-task models
         seed: Optional random seed
-        
+
     Returns:
         Tensor: Random input tensor
     """
-    with (nullcontext() if seed is None else torch.random.fork_rng()):
+    with nullcontext() if seed is None else torch.random.fork_rng():
         if seed:
             torch.random.manual_seed(seed)
 
@@ -83,6 +85,7 @@ def gen_random_inputs(
             return model.input_transform.untransform(X)
 
         return X
+
 
 class FactoryFunctionRegistry:
     def __init__(self, factories: Optional[Dict[T, TFactory]] = None):
@@ -119,7 +122,7 @@ def _randomize_lengthscales(
     if kernel.ard_num_dims is None:
         raise NotImplementedError
 
-    with (nullcontext() if seed is None else torch.random.fork_rng()):
+    with nullcontext() if seed is None else torch.random.fork_rng():
         if seed:
             torch.random.manual_seed(seed)
 
@@ -316,4 +319,4 @@ def _gen_model_multitask(
             outcome_transform=Standardize(m=Y.shape[-1], batch_shape=batch_shape),
         )
 
-    return model.to(**tkwargs) 
+    return model.to(**tkwargs)

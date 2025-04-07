@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 from abc import ABC
-from string import ascii_letters
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from string import ascii_letters
 from typing import Any
 
 from botorch.exceptions.errors import UnsupportedError
@@ -57,16 +57,22 @@ class PathDict(SamplePath, ModuleDictMixin[SamplePath]):
         self.reducer = reducer
         self.input_transform = input_transform
         self.output_transform = output_transform
-        
+
         # Initialize paths dictionary - reuse ModuleDict if provided
         self._paths_dict = (
-            paths if isinstance(paths, ModuleDict) else ModuleDict({} if paths is None else paths)
+            paths
+            if isinstance(paths, ModuleDict)
+            else ModuleDict({} if paths is None else paths)
         )
         self.register_module("_paths_dict", self._paths_dict)
 
     def forward(self, x: Tensor, **kwargs: Any) -> Tensor | dict[str, Tensor]:
         outputs = [path(x, **kwargs) for path in self._paths_dict.values()]
-        return dict(zip(self._paths_dict, outputs)) if self.reducer is None else self.reducer(outputs)
+        return (
+            dict(zip(self._paths_dict, outputs))
+            if self.reducer is None
+            else self.reducer(outputs)
+        )
 
     def items(self) -> Iterable[tuple[str, SamplePath]]:
         return self._paths_dict.items()
@@ -122,10 +128,12 @@ class PathList(SamplePath, ModuleListMixin[SamplePath]):
         self.reducer = reducer
         self.input_transform = input_transform
         self.output_transform = output_transform
-        
+
         # Initialize paths list - reuse ModuleList if provided
         self._paths_list = (
-            paths if isinstance(paths, ModuleList) else ModuleList([] if paths is None else paths)
+            paths
+            if isinstance(paths, ModuleList)
+            else ModuleList([] if paths is None else paths)
         )
         self.register_module("_paths_list", self._paths_list)
 
