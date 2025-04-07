@@ -16,14 +16,12 @@ r"""
 
 from __future__ import annotations
 
-from math import pi
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Optional
 
 import torch
 from botorch.exceptions.errors import UnsupportedError
 from botorch.sampling.pathwise.features.maps import (
     DirectSumFeatureMap,
-    FeatureMap,
     FourierFeatureMap,
     IndexKernelFeatureMap,
     KernelFeatureMap,
@@ -31,26 +29,23 @@ from botorch.sampling.pathwise.features.maps import (
     MultitaskKernelFeatureMap,
     OuterProductFeatureMap,
 )
-from botorch.sampling.pathwise.utils import (
-    append_transform,
-    get_kernel_num_inputs,
-    is_finite_dimensional,
-    prepend_transform,
-    transforms,
-)
+from botorch.sampling.pathwise.utils import get_kernel_num_inputs, transforms
 from botorch.utils.dispatcher import Dispatcher
 from botorch.utils.sampling import draw_sobol_normal_samples
-from botorch.utils.types import DEFAULT
 from gpytorch import kernels
 from torch import Size, Tensor
 from torch.distributions import Gamma
 
-# IMPLEMENTATION NOTE: This type definition specifies the interface for feature map generators.
-# It defines a callable that takes a kernel and dimension parameters and returns a KernelFeatureMap.
+# IMPLEMENTATION NOTE: This type definition specifies the interface for feature map
+# generators.
+# It defines a callable that takes a kernel and dimension parameters and returns a
+# KernelFeatureMap.
 TKernelFeatureMapGenerator = Callable[[kernels.Kernel, int, int], KernelFeatureMap]
 
-# IMPLEMENTATION NOTE: We use a Dispatcher pattern to register different handlers for various
-# kernel types. This allows for extensibility - new kernel types can be supported by adding
+# IMPLEMENTATION NOTE: We use a Dispatcher pattern to register different handlers for
+# various
+# kernel types. This allows for extensibility - new kernel types can be supported by
+# adding
 # new handler functions registered to this dispatcher.
 GenKernelFeatureMap = Dispatcher("gen_kernel_feature_map")
 
@@ -77,7 +72,8 @@ def gen_kernel_feature_map(
     """
     # IMPLEMENTATION NOTE: This function serves as the main entry point for generating
     # feature maps from kernels. It uses the dispatcher to call the appropriate handler
-    # based on the kernel type. The function has been updated from the original implementation
+    # based on the kernel type. The function has been updated from the original
+    # implementation
     # to use more descriptive parameter names (num_ambient_inputs instead of num_inputs,
     # and num_random_features instead of num_outputs) to better reflect their purpose.
     return GenKernelFeatureMap(
@@ -115,10 +111,13 @@ def _gen_fourier_features(
         cosine_only: Specifies whether or not to use cosine features with a random
             phase instead of paired sine and cosine features.
     """
-    # IMPLEMENTATION NOTE: This function implements the random Fourier features method from
+    # IMPLEMENTATION NOTE: This function implements the random Fourier features method
+    # from
     # to approximate stationary kernels. It has been enhanced from
-    # the original implementation to support the cosine_only option, which is critical for
-    # the ProductKernel implementation where we need to avoid the tensor product of sine and
+    # the original implementation to support the cosine_only option, which is critical
+    # for
+    # the ProductKernel implementation where we need to avoid the tensor product of sine
+    # and
     # cosine features.
 
     if not cosine_only and num_random_features % 2:
@@ -147,9 +146,9 @@ def _gen_fourier_features(
 
     # Handle the cosine_only case by generating random phase shifts
     if cosine_only:
-        # IMPLEMENTATION NOTE: When cosine_only is True, we use cosine features with random phases
-        # instead of paired sine and cosine features. This is important for ProductKernel where
-        # we need to take element-wise products of features.
+        # IMPLEMENTATION NOTE: When cosine_only is True, we use cosine features with
+        # random phases instead of paired sine and cosine features. This is important
+        # for ProductKernel where we need to take element-wise products of features.
         bias = (
             2
             * torch.pi
@@ -211,10 +210,10 @@ def _gen_kernel_feature_map_matern(
     kernel: kernels.MaternKernel,
     **kwargs: Any,
 ) -> KernelFeatureMap:
-    # IMPLEMENTATION NOTE: This handler generates Fourier features for the Matern kernel.
+    # smoothness parameter nu. The spectral density guides weight sampling.
     # For Matern kernels, we use a different weight generator that incorporates the
-    # smoothness parameter nu. The weights are sampled from a distribution that depends
-    # on nu, following the spectral density of the Matern kernel.
+    # smoothness parameter nu. Weights follow a distribution based on nu.
+    # This follows the Matern kernel's spectral density.
     def _weight_generator(shape: Size) -> Tensor:
         try:
             n, d = shape

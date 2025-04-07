@@ -7,16 +7,14 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from itertools import repeat
 from math import prod
 from string import ascii_letters
-from typing import Any, Iterable, List, Optional, Sequence, Union
+from typing import Any, Iterable, List, Optional, Union
 
 import torch
 from botorch.exceptions.errors import UnsupportedError
 from botorch.sampling.pathwise.utils import (
     ModuleListMixin,
-    sparse_block_diag,
     TInputTransform,
     TOutputTransform,
     TransformedModuleMixin,
@@ -30,8 +28,7 @@ from linear_operator.operators import (
     LinearOperator,
 )
 from torch import Size, Tensor
-from torch.nn import Module, ModuleList
-from torch.utils.data import TensorDataset
+from torch.nn import Module
 
 
 class FeatureMap(TransformedModuleMixin, Module):
@@ -67,6 +64,11 @@ class FeatureMapList(Module, ModuleListMixin[FeatureMap]):
     """
 
     def __init__(self, feature_maps: Iterable[FeatureMap]):
+        """Initialize a list of feature maps.
+
+        Args:
+            feature_maps: An iterable of FeatureMap objects to include in the list.
+        """
         Module.__init__(self)
         ModuleListMixin.__init__(self, attr_name="feature_maps", modules=feature_maps)
 
@@ -101,6 +103,13 @@ class DirectSumFeatureMap(FeatureMap, ModuleListMixin[FeatureMap]):
         input_transform: Optional[TInputTransform] = None,
         output_transform: Optional[TOutputTransform] = None,
     ):
+        """Initialize a direct sum feature map.
+
+        Args:
+            feature_maps: An iterable of feature maps to combine.
+            input_transform: Optional transform to apply to inputs.
+            output_transform: Optional transform to apply to outputs.
+        """
         FeatureMap.__init__(self)
         ModuleListMixin.__init__(self, attr_name="feature_maps", modules=feature_maps)
         self.input_transform = input_transform
@@ -197,6 +206,13 @@ class HadamardProductFeatureMap(FeatureMap, ModuleListMixin[FeatureMap]):
         input_transform: Optional[TInputTransform] = None,
         output_transform: Optional[TOutputTransform] = None,
     ):
+        """Initialize a Hadamard product feature map.
+
+        Args:
+            feature_maps: An iterable of feature maps to combine.
+            input_transform: Optional transform to apply to inputs.
+            output_transform: Optional transform to apply to outputs.
+        """
         FeatureMap.__init__(self)
         ModuleListMixin.__init__(self, attr_name="feature_maps", modules=feature_maps)
         self.input_transform = input_transform
@@ -224,6 +240,13 @@ class OuterProductFeatureMap(FeatureMap, ModuleListMixin[FeatureMap]):
         input_transform: Optional[TInputTransform] = None,
         output_transform: Optional[TOutputTransform] = None,
     ):
+        """Initialize an outer product feature map.
+
+        Args:
+            feature_maps: An iterable of feature maps to combine.
+            input_transform: Optional transform to apply to inputs.
+            output_transform: Optional transform to apply to outputs.
+        """
         FeatureMap.__init__(self)
         ModuleListMixin.__init__(self, attr_name="feature_maps", modules=feature_maps)
         self.input_transform = input_transform
