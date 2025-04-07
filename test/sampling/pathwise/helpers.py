@@ -14,11 +14,9 @@ from typing import Any, Callable, Dict, Iterable, Iterator, Optional, Type, Type
 import torch
 from botorch import models
 from botorch.exceptions.errors import UnsupportedError
-from botorch.models.gp_regression import SingleTaskGP
 from botorch.models.model import Model
 from botorch.models.transforms.input import Normalize
 from botorch.models.transforms.outcome import Standardize
-from botorch.sampling.pathwise.features.generators import gen_kernel_feature_map
 from botorch.sampling.pathwise.utils import get_train_inputs
 from gpytorch import kernels
 from torch import Size
@@ -89,6 +87,11 @@ def gen_random_inputs(
 
 class FactoryFunctionRegistry:
     def __init__(self, factories: Optional[Dict[T, TFactory]] = None):
+        """Initialize the registry with optional factories dictionary.
+
+        Args:
+            factories: Optional dictionary mapping types to factory functions
+        """
         self.factories = {} if factories is None else factories
 
     def register(self, typ: T, **kwargs: Any) -> None:

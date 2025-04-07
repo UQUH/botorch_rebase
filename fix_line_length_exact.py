@@ -17,7 +17,7 @@ def fix_file(filename, line_num, new_content):
             leading_tabs = len(lines[i]) - len(lines[i].lstrip("\t"))
             # Replace each tab with 4 spaces (common convention)
             lines[i] = " " * (4 * leading_tabs) + lines[i].lstrip("\t")
-        
+
         # Remove trailing whitespace
         lines[i] = lines[i].rstrip() + "\n"
 
@@ -31,4 +31,4 @@ if __name__ == "__main__":
         "botorch/sampling/pathwise/features/generators.py",
         216,  # Line 217 (0-indexed)
         "    # smoothness parameter nu. The spectral density guides weight sampling.",
-    ) 
+    )

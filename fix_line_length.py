@@ -47,4 +47,4 @@ def fix_file(filename):
 
 
 if __name__ == "__main__":
-    fix_file("botorch/sampling/pathwise/features/generators.py") 
+    fix_file("botorch/sampling/pathwise/features/generators.py")

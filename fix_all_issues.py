@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
 
+
 def fix_generators_indentation():
-    """Fix indentation issues in generators.py by completely rewriting the problematic section."""
+    """Fix indentation issues in generators.py by completely rewriting
+    the problematic section."""
     with open("botorch/sampling/pathwise/features/generators.py", "r") as f:
         lines = f.readlines()
-    
+
     # The problematic section is around line 232
     # Let's rewrite the entire function to ensure consistency
     start_line = 0
     end_line = len(lines)
-    
+
     for i, line in enumerate(lines):
         if "@GenKernelFeatureMap.register(kernels.ScaleKernel)" in line:
             start_line = i
             break
-    
+
     for i in range(start_line, len(lines)):
-        if "@GenKernelFeatureMap.register" in lines[i] and "ScaleKernel" not in lines[i]:
+        if (
+            "@GenKernelFeatureMap.register" in lines[i]
+            and "ScaleKernel" not in lines[i]
+        ):
             end_line = i
             break
-    
+
     # Rewrite the function with correct indentation
     new_section = """@GenKernelFeatureMap.register(kernels.ScaleKernel)
 def _gen_kernel_feature_map_scale(
@@ -52,10 +57,10 @@ def _gen_kernel_feature_map_scale(
     return feature_map
 
 """
-    
+
     # Replace the problematic section
     new_lines = lines[:start_line] + [new_section] + lines[end_line:]
-    
+
     with open("botorch/sampling/pathwise/features/generators.py", "w") as f:
         for line in new_lines:
             if isinstance(line, list):
@@ -63,51 +68,60 @@ def _gen_kernel_feature_map_scale(
             else:
                 f.write(line)
 
+
 def fix_mixins_long_line():
     """Fix the long line in mixins.py."""
     with open("botorch/sampling/pathwise/utils/mixins.py", "r") as f:
         lines = f.readlines()
-    
+
     for i, line in enumerate(lines):
         if "Call forward instead of super()" in line:
-            lines[i] = "        # Call forward() - bypassing super().__call__ to implement interface\n"
-    
+            lines[i] = (
+                "        # Call forward() - bypassing super().__call__ to implement "
+                "interface\n"
+            )
+
     with open("botorch/sampling/pathwise/utils/mixins.py", "w") as f:
         f.writelines(lines)
+
 
 def fix_transforms_whitespace():
     """Fix whitespace issues in transforms.py."""
     with open("botorch/sampling/pathwise/utils/transforms.py", "r") as f:
         lines = f.readlines()
-    
+
     # Remove trailing whitespace from all lines
     for i in range(len(lines)):
         lines[i] = lines[i].rstrip() + "\n"
-    
+
     with open("botorch/sampling/pathwise/utils/transforms.py", "w") as f:
         f.writelines(lines)
+
 
 def fix_generator_comment():
     """Fix the comment line in generators.py."""
     with open("botorch/sampling/pathwise/features/generators.py", "r") as f:
         lines = f.readlines()
-    
-    lines[216] = "    # smoothness parameter nu. The spectral density guides weight sampling.\n"
-    
+
+    lines[216] = (
+        "    # smoothness parameter nu. The spectral density guides weight sampling.\n"
+    )
+
     with open("botorch/sampling/pathwise/features/generators.py", "w") as f:
         f.writelines(lines)
+
 
 if __name__ == "__main__":
     print("Fixing generator comment...")
     fix_generator_comment()
-    
+
     print("Fixing mixins long line...")
     fix_mixins_long_line()
-    
+
     print("Fixing transforms whitespace...")
     fix_transforms_whitespace()
-    
+
     print("Fixing generators indentation...")
     fix_generators_indentation()
-    
-    print("All fixes applied successfully.") 
+
+    print("All fixes applied successfully.")

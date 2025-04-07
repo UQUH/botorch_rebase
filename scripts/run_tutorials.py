@@ -20,7 +20,8 @@ from memory_profiler import memory_usage
 IGNORE_ALWAYS = set()  # ignored in smoke tests and full runs
 RUN_IF_SMOKE_TEST_IGNORE_IF_STANDARD = set()  # only used in smoke tests
 
-# Add tutorials that require pretrained models or frequently fail in CI to ignore list in smoke test mode
+# Add tutorials that require pretrained models or frequently fail in CI to ignore list
+# in smoke test mode
 IGNORE_IN_SMOKE_TEST = {
     "vae_mnist.ipynb",  # Requires pretrained models
     "preference_bo.ipynb",  # May be unstable in CI
@@ -168,8 +169,8 @@ if __name__ == "__main__":
         "-n",
         "--name",
         help="Run a specific tutorial by name. The name should include the "
-        ".ipynb extension. If the tutorial is on the ignore list, you still need "
-        "to specify --include-ignored.",
+        ".ipynb extension. If the tutorial is on the ignore list, you still "
+        "need to specify --include-ignored.",
     )
     parser.add_argument(
         "--ci-mode",

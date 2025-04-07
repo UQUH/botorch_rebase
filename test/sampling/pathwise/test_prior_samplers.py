@@ -104,8 +104,10 @@ class TestPriorSamplers(BotorchTestCase):
             seed += 1
 
     def test_draw_kernel_feature_paths(self):
-        for seed, models in enumerate(self.models.values()):
-            for model, sample_shape in product(models, [Size([1024]), Size([2, 512])]):
+        for seed, model_group in enumerate(self.models.values()):
+            for model, sample_shape in product(
+                model_group, [Size([1024]), Size([2, 512])]
+            ):
                 with torch.random.fork_rng():
                     torch.random.manual_seed(seed)
                     paths = draw_kernel_feature_paths(

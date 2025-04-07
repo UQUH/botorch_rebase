@@ -7,17 +7,26 @@
 from __future__ import annotations
 
 from math import prod
-from unittest.mock import MagicMock, patch
+
+# Remove unused imports
+# from unittest.mock import MagicMock, patch
 
 import torch
 from botorch.sampling.pathwise.features import maps
 from botorch.sampling.pathwise.features.generators import gen_kernel_feature_map
-from botorch.sampling.pathwise.utils.transforms import ChainedTransform, FeatureSelector
+
+# Remove unused imports
+# from botorch.sampling.pathwise.utils.transforms import (
+#     ChainedTransform,
+#     FeatureSelector
+# )
 from botorch.utils.testing import BotorchTestCase
 from gpytorch import kernels
 from linear_operator.operators import KroneckerProductLinearOperator
 from torch import Size
-from torch.nn import Module
+
+# Remove unused import
+# from torch.nn import Module
 
 from ..helpers import gen_module, TestCaseConfig
 

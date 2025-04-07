@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass, replace
-from unittest import TestCase
+# Remove unused imports
+# from contextlib import contextmanager
+from dataclasses import replace
+
+# from unittest import TestCase
 from unittest.mock import patch
 
 import torch
@@ -119,7 +121,8 @@ class TestGaussianUpdates(BotorchTestCase):
                 f"Max absolute difference: {(weight - update_paths.weight).abs().max()}"
             )
             print(
-                f"Relative difference: {(weight - update_paths.weight).abs().mean() / weight.abs().mean()}"
+                f"Relative difference: "
+                f"{(weight - update_paths.weight).abs().mean() / weight.abs().mean()}"
             )
 
             # Use higher tolerance for numerical stability

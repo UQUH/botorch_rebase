@@ -22,6 +22,7 @@ from typing import (
 
 from botorch.models.transforms.input import InputTransform
 from botorch.models.transforms.outcome import OutcomeTransform
+
 # from botorch.utils.types import cast
 from torch import Tensor
 from torch.nn import Module, ModuleDict, ModuleList

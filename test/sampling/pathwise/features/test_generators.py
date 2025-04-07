@@ -7,18 +7,14 @@
 from __future__ import annotations
 
 from math import ceil
-from typing import List, Tuple
 
 import torch
 from botorch.exceptions.errors import UnsupportedError
 from botorch.sampling.pathwise.features.generators import gen_kernel_feature_map
 from botorch.sampling.pathwise.features.maps import FourierFeatureMap
-from botorch.sampling.pathwise.utils import is_finite_dimensional, kernel_instancecheck
+from botorch.sampling.pathwise.utils import is_finite_dimensional
 from botorch.utils.testing import BotorchTestCase
 from gpytorch import kernels
-from gpytorch.kernels import MaternKernel, RBFKernel, ScaleKernel
-from gpytorch.kernels.kernel import Kernel
-from torch import Size, Tensor
 
 
 class TestGenKernelFeatureMap(BotorchTestCase):

@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 
+
 def fix_generators_file():
-    with open("botorch/sampling/pathwise/features/generators.py", "r") as f:
-        content = f.read()
-    
-    # Identify and replace the problem section
-    # Pattern to match entire ScaleKernel function
-    scale_kernel_section = r"""@GenKernelFeatureMap.register\(kernels\.ScaleKernel\)[\s\S]*?def _gen_kernel_feature_map_scale[\s\S]*?return feature_map"""
-    
+    # Create the corrected content for the ScaleKernel function
+    # with proper indentation
+
     # Replacement with consistent indentation
     replacement = """@GenKernelFeatureMap.register(kernels.ScaleKernel)
 def _gen_kernel_feature_map_scale(
@@ -38,13 +35,14 @@ def _gen_kernel_feature_map_scale(
         transforms.OutputscaleTransform(kernel), feature_map.output_transform
     )
     return feature_map"""
-    
+
     # Write the file with the corrected content
     with open("fix_scale_kernel.txt", "w") as f:
         f.write(replacement)
-    
+
     print("Created fix_scale_kernel.txt with corrected content.")
     print("You'll need to manually insert this into generators.py.")
 
+
 if __name__ == "__main__":
-    fix_generators_file() 
+    fix_generators_file()
